@@ -42,6 +42,21 @@ jobs:
       - name: Restore
         run: dotnet restore .\QQAntiRecall.sln
 
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content -LiteralPath ".\src\QQAntiRecall.App\QQAntiRecall.App.csproj" -Raw
+          $versionNode = $project.SelectSingleNode("/Project/PropertyGroup/Version")
+          if ($null -eq $versionNode) {
+            throw "The application project does not define a Version."
+          }
+
+          $expectedTag = "v$($versionNode.InnerText)"
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Release tag '$env:GITHUB_REF_NAME' does not match project version '$expectedTag'."
+          }
+
       - name: Verify formatting
         run: dotnet format .\QQAntiRecall.sln --verify-no-changes --no-restore
 
@@ -96,3 +111,26 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test-and-package
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Download Windows executable
+        uses: actions/download-artifact@v4
+        with:
+          name: QQAntiRecall-win-x64-${{ github.sha }}
+          path: release
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME "release/QQAntiRecall.exe#QQAntiRecall.exe" --verify-tag --generate-notes --latest --title "QQAntiRecall $env:GITHUB_REF_NAME"

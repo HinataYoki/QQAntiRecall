@@ -90,8 +90,9 @@ dotnet run --project .\src\QQAntiRecall.App\QQAntiRecall.App.csproj
 dotnet publish .\src\QQAntiRecall.App\QQAntiRecall.App.csproj -c Release -r win-x64 --self-contained true -o .\artifacts\win-x64
 ```
 
-CI 会执行格式检查、完整测试、单文件发布和启动冒烟测试。当前产物未进行代码签名，正式
-公开分发前应补充 Windows 代码签名。
+CI 会执行格式检查、完整测试、单文件发布和启动冒烟测试。推送与项目版本一致的 `v*`
+标签（例如 `v0.0.1`）后，CI 会在全部检查通过时创建 GitHub Release，并附上 Windows
+x64 单文件。当前产物未进行代码签名，正式公开分发前应补充 Windows 代码签名。
 
 ## 技术来源
 
