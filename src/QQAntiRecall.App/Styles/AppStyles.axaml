@@ -1,0 +1,117 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Style Selector="Window">
+        <Setter Property="Background" Value="{DynamicResource SurfaceBackgroundBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Setter Property="FontFamily" Value="Inter, Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif" />
+        <Setter Property="FontSize" Value="{StaticResource FontSizeBase}" />
+    </Style>
+
+    <Style Selector="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.h1">
+        <Setter Property="FontSize" Value="{StaticResource FontSizeLg}" />
+        <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+    <Style Selector="TextBlock.h2">
+        <Setter Property="FontSize" Value="{StaticResource FontSizeBase}" />
+        <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+    <Style Selector="TextBlock.label">
+        <Setter Property="FontSize" Value="{StaticResource FontSizeXs}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+        <Setter Property="FontSize" Value="{StaticResource FontSizeXs}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="TextBlock.secondary">
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.mono">
+        <Setter Property="FontFamily" Value="Cascadia Mono, SFMono-Regular, Menlo, monospace" />
+        <Setter Property="FontSize" Value="{StaticResource FontSizeSm}" />
+    </Style>
+
+    <Style Selector="Button">
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="Padding" Value="{StaticResource ButtonPadding}" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+        <Setter Property="FontSize" Value="{StaticResource FontSizeSm}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="RenderTransform" Value="none" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
+                <BrushTransition Property="Foreground" Duration="0:0:0.12" Easing="CubicEaseOut" />
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.08" Easing="QuadraticEaseOut" />
+            </Transitions>
+        </Setter>
+    </Style>
+    <Style Selector="Button:pressed">
+        <Setter Property="RenderTransform" Value="scale(0.98)" />
+    </Style>
+    <Style Selector="Button:disabled">
+        <Setter Property="Opacity" Value="{StaticResource DisabledOpacity}" />
+        <Setter Property="Cursor" Value="Arrow" />
+    </Style>
+    <Style Selector="Button.primary">
+        <Setter Property="MinHeight" Value="42" />
+        <Setter Property="Padding" Value="{StaticResource PrimaryButtonPadding}" />
+        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+    </Style>
+    <Style Selector="Button.secondary">
+        <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Button.secondary:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+    </Style>
+    <Style Selector="Button.ghost">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Button.ghost:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+    </Style>
+    <Style Selector="Button.icon">
+        <Setter Property="MinWidth" Value="36" />
+        <Setter Property="Width" Value="36" />
+        <Setter Property="Padding" Value="{StaticResource IconButtonPadding}" />
+    </Style>
+
+    <Style Selector="TextBox">
+        <Setter Property="MinHeight" Value="{StaticResource ControlHeight}" />
+        <Setter Property="Padding" Value="{StaticResource ControlPadding}" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+        <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
+    <Style Selector="ProgressBar.busy-progress">
+        <Setter Property="Height" Value="3" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+
+    <Style Selector="LucideIcon">
+        <Setter Property="Size" Value="{StaticResource IconSizeMd}" />
+        <Setter Property="StrokeWidth" Value="1.8" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+</Styles>

@@ -1,0 +1,212 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Style Selector="Border.app-header">
+        <Setter Property="Padding" Value="{StaticResource HeaderPadding}" />
+        <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+
+    <Style Selector="Border.status-rail">
+        <Setter Property="Width" Value="236" />
+        <Setter Property="Padding" Value="{StaticResource RailPadding}" />
+        <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,1,0" />
+    </Style>
+
+    <Style Selector="Border.rail-icon">
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+        <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    </Style>
+    <Style Selector="Border.rail-icon LucideIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Border.rail-icon.success">
+        <Setter Property="Background" Value="{DynamicResource SuccessSubtleBrush}" />
+    </Style>
+    <Style Selector="Border.rail-icon.success LucideIcon">
+        <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+    </Style>
+    <Style Selector="Border.rail-icon.warning">
+        <Setter Property="Background" Value="{DynamicResource WarningSubtleBrush}" />
+    </Style>
+    <Style Selector="Border.rail-icon.warning LucideIcon">
+        <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="Border.rail-icon.error">
+        <Setter Property="Background" Value="{DynamicResource DangerSubtleBrush}" />
+    </Style>
+    <Style Selector="Border.rail-icon.error LucideIcon">
+        <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+
+    <Style Selector="TextBlock.rail-value">
+        <Setter Property="FontSize" Value="{StaticResource FontSizeSm}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.rail-value.success">
+        <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+    </Style>
+    <Style Selector="TextBlock.rail-value.warning">
+        <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="TextBlock.rail-value.error">
+        <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+
+    <Style Selector="Border.status-band">
+        <Setter Property="MinHeight" Value="76" />
+        <Setter Property="Padding" Value="{StaticResource StatusBandPadding}" />
+        <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderThickness" Value="3,0,0,0" />
+    </Style>
+    <Style Selector="Border.status-band LucideIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Border.status-band.success">
+        <Setter Property="Background" Value="{DynamicResource SuccessSubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+    </Style>
+    <Style Selector="Border.status-band.success LucideIcon">
+        <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+    </Style>
+    <Style Selector="Border.status-band.warning">
+        <Setter Property="Background" Value="{DynamicResource WarningSubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="Border.status-band.warning LucideIcon">
+        <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="Border.status-band.error">
+        <Setter Property="Background" Value="{DynamicResource DangerSubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="Border.status-band.error LucideIcon">
+        <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+
+    <Style Selector="Border.status-pill">
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusFull}" />
+        <Setter Property="Padding" Value="{StaticResource BadgePadding}" />
+        <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.status-pill.warning">
+        <Setter Property="Background" Value="{DynamicResource WarningSubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="Border.status-pill.warning LucideIcon">
+        <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    </Style>
+
+    <Style Selector="Border.busy-strip">
+        <Setter Property="Padding" Value="{StaticResource StatusBandPadding}" />
+        <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    </Style>
+
+    <Style Selector="Border.target-row">
+        <Setter Property="Padding" Value="{StaticResource TargetRowPadding}" />
+        <Setter Property="Margin" Value="{StaticResource TargetRowMargin}" />
+        <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusLg}" />
+        <Setter Property="BoxShadow" Value="{DynamicResource ShadowSm}" />
+    </Style>
+    <Style Selector="TextBlock.target-version">
+        <Setter Property="FontSize" Value="{StaticResource FontSizeMd}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.metadata-label">
+        <Setter Property="FontSize" Value="{StaticResource FontSizeXs}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="TextBlock.metadata-value">
+        <Setter Property="FontSize" Value="{StaticResource FontSizeSm}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+
+    <Style Selector="Border.state-badge">
+        <Setter Property="Padding" Value="{StaticResource BadgePadding}" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+        <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.state-badge TextBlock">
+        <Setter Property="FontSize" Value="{StaticResource FontSizeXs}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <Style Selector="Border.state-badge.ready">
+        <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Border.state-badge.ready TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Border.state-badge.installed">
+        <Setter Property="Background" Value="{DynamicResource SuccessSubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+    </Style>
+    <Style Selector="Border.state-badge.installed TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+    </Style>
+    <Style Selector="Border.state-badge.problem">
+        <Setter Property="Background" Value="{DynamicResource DangerSubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="Border.state-badge.problem TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+
+    <Style Selector="Border.empty-state">
+        <Setter Property="Padding" Value="32,40" />
+        <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusLg}" />
+    </Style>
+
+    <Style Selector="Border.divider">
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
+    </Style>
+
+    <Style Selector="Border.command-bar">
+        <Setter Property="Padding" Value="{StaticResource CommandBarPadding}" />
+        <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,1,0,0" />
+    </Style>
+
+    <Style Selector="Button.action">
+        <Setter Property="MinHeight" Value="42" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="Window.compact Border.status-rail">
+        <Setter Property="Width" Value="204" />
+        <Setter Property="Padding" Value="{StaticResource RailPaddingCompact}" />
+    </Style>
+    <Style Selector="Window.compact StackPanel.main-content">
+        <Setter Property="Margin" Value="{StaticResource PagePaddingCompact}" />
+    </Style>
+    <Style Selector="Window.compact Border.command-bar">
+        <Setter Property="Padding" Value="{StaticResource CommandBarPaddingCompact}" />
+    </Style>
+    <Style Selector="Window.compact TextBlock.platform-detail">
+        <Setter Property="IsVisible" Value="False" />
+    </Style>
+</Styles>

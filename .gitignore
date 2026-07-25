@@ -1,0 +1,76 @@
+# .NET build and publish output
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+[Pp]ublish/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+
+# IDE and user-specific files
+.vs/
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.csproj.user
+*.DotSettings.user
+_ReSharper*/
+
+# Tests, coverage, and benchmarks
+TestResults/
+BenchmarkDotNet.Artifacts/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+*.trx
+
+# Local NuGet and generated packages
+.nuget/packages/
+packages/
+*.nupkg
+*.snupkg
+
+# Compiled binaries, symbols, archives, and diagnostics
+*.dll
+*.exe
+*.so
+*.dylib
+*.pdb
+*.dmp
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+
+# Local settings, logs, and temporary files
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+*.pid
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Generated visual verification and patch transaction files
+screenshots/
+*.qqar.tmp
+*.qqar.rollback
+.wrapper.node.qqantirecall.*.tmp
+.wrapper.node.qqantirecall.*.rollback

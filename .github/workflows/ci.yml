@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  test-and-package:
+    name: Test and package Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: |
+            global.json
+            **/*.csproj
+
+      - name: Restore
+        run: dotnet restore .\QQAntiRecall.sln
+
+      - name: Verify formatting
+        run: dotnet format .\QQAntiRecall.sln --verify-no-changes --no-restore
+
+      - name: Run tests
+        run: dotnet test .\QQAntiRecall.sln --configuration Release --no-restore -warnaserror -p:ContinuousIntegrationBuild=true
+
+      - name: Publish single-file executable
+        run: dotnet publish .\src\QQAntiRecall.App\QQAntiRecall.App.csproj --configuration Release --runtime win-x64 --self-contained true --output .\artifacts\win-x64 -warnaserror -p:ContinuousIntegrationBuild=true
+
+      - name: Validate artifact
+        id: artifact
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem -LiteralPath ".\artifacts\win-x64" -Recurse -File)
+          if ($files.Count -ne 1 -or $files[0].Name -ne "QQAntiRecall.exe") {
+            $names = $files.FullName -join [Environment]::NewLine
+            throw "Expected only QQAntiRecall.exe, found $($files.Count) files:$([Environment]::NewLine)$names"
+          }
+
+          if ($files[0].Length -gt 35MB) {
+            throw "QQAntiRecall.exe exceeds the 35 MiB release size budget."
+          }
+
+          $sizeMiB = [Math]::Round($files[0].Length / 1MB, 2)
+          "size_mib=$sizeMiB" >> $env:GITHUB_OUTPUT
+          "Published QQAntiRecall.exe: $sizeMiB MiB"
+
+      - name: Smoke-test published executable
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath ".\artifacts\win-x64\QQAntiRecall.exe" -PassThru
+          try {
+            Start-Sleep -Seconds 5
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "QQAntiRecall.exe exited during startup with code $($process.ExitCode)."
+            }
+          }
+          finally {
+            $process.Refresh()
+            if (-not $process.HasExited) {
+              Stop-Process -Id $process.Id
+              $process.WaitForExit()
+            }
+          }
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: QQAntiRecall-win-x64-${{ github.sha }}
+          path: artifacts/win-x64/QQAntiRecall.exe
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
