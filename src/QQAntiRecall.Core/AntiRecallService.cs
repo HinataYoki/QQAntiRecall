@@ -710,7 +710,7 @@ public sealed partial class AntiRecallService : IAntiRecallService
                     StringComparison.OrdinalIgnoreCase);
                 if (!currentPatchMatches
                     && !string.Equals(
-                        ComputeSha256(ApplyPatchDefinitions(content, PatchCatalog.LegacyDefinitions)),
+                        ComputeSha256(ApplyPatchProfile(content, PatchCatalog.LegacyProfile)),
                         target.PatchedSha256,
                         StringComparison.OrdinalIgnoreCase))
                 {
@@ -1001,16 +1001,14 @@ public sealed partial class AntiRecallService : IAntiRecallService
                 WildcardPattern.FindAll(content, definition.PatchedPattern).Count))
             .ToArray();
 
-        var allOriginal = statuses.Zip(PatchCatalog.Definitions).All(pair =>
-                pair.First.OriginalMatchCount == pair.Second.ExpectedMatchCount
-                && pair.First.PatchedMatchCount == 0)
-            && PatchCatalog.HasValidNormalRecallCallTargets(content);
-        var allPatched = statuses.Zip(PatchCatalog.Definitions).All(pair =>
-                pair.First.OriginalMatchCount == 0
-                && pair.First.PatchedMatchCount == pair.Second.ExpectedMatchCount)
+        var originalProfile = PatchCatalog.FindOriginalProfile(statuses);
+        var patchedProfile = PatchCatalog.FindPatchedProfile(statuses);
+        var allOriginal = originalProfile is not null
+            && PatchCatalog.HasValidNormalRecallCallTargets(content, originalProfile);
+        var allPatched = patchedProfile is not null
             && PatchCatalog.HasUnmodifiedNormalRecallFunction(content);
         var legacyInstalled = PatchCatalog.IsLegacyInstalled(content)
-            && PatchCatalog.HasValidNormalRecallCallTargets(content);
+            && PatchCatalog.Profiles.Any(profile => PatchCatalog.HasValidNormalRecallCallTargets(content, profile));
         var noKnownSignature = statuses.All(status => status.OriginalMatchCount == 0 && status.PatchedMatchCount == 0);
         var state = allOriginal
             ? TargetPatchState.ReadyToInstall
@@ -1023,8 +1021,10 @@ public sealed partial class AntiRecallService : IAntiRecallService
                         : TargetPatchState.Inconsistent;
         var detail = state switch
         {
-            TargetPatchState.ReadyToInstall => $"{PatchCatalog.Definitions.Count} 组原始签名完整匹配。",
-            TargetPatchState.Installed => $"{PatchCatalog.Definitions.Count} 组补丁签名完整匹配。",
+            TargetPatchState.ReadyToInstall =>
+                $"{PatchCatalog.Definitions.Count} 组原始签名完整匹配（兼容配置 {originalProfile!.Name}）。",
+            TargetPatchState.Installed =>
+                $"{PatchCatalog.Definitions.Count} 组补丁签名完整匹配（兼容配置 {patchedProfile!.Name}）。",
             TargetPatchState.LegacyInstalled => "检测到 0.0.1 旧版补丁；可从原备份安全升级或恢复。",
             TargetPatchState.Unsupported => "未匹配到受支持的 QQ 签名。",
             _ => "签名缺失、重复，或原始与补丁状态混合。",
@@ -1059,7 +1059,9 @@ public sealed partial class AntiRecallService : IAntiRecallService
     private static ReplacementPlan CreateInstallPlan(TargetSnapshot snapshot)
     {
         var original = snapshot.Content ?? throw new InvalidOperationException("Target content was not loaded.");
-        var patched = ApplyPatchDefinitions(original, PatchCatalog.Definitions);
+        var profile = PatchCatalog.FindOriginalProfile(snapshot.Result.Signatures)
+            ?? throw new InvalidDataException("Target no longer matches one complete original patch profile.");
+        var patched = ApplyPatchProfile(original, profile);
         var patchedResult = AnalyzeTarget(snapshot.Target, patched);
         if (patchedResult.State != TargetPatchState.Installed)
         {
@@ -1074,20 +1076,21 @@ public sealed partial class AntiRecallService : IAntiRecallService
     }
 
     /// <summary>
-    /// Applies one complete catalog to a clone after validating every declared original match count.
+    /// Applies one complete profile to a clone after validating every declared original match count.
     /// </summary>
-    private static byte[] ApplyPatchDefinitions(
-        byte[] original,
-        IReadOnlyList<PatchDefinition> definitions)
+    private static byte[] ApplyPatchProfile(byte[] original, PatchProfile profile)
     {
+        ArgumentNullException.ThrowIfNull(profile);
         var patched = (byte[])original.Clone();
-        foreach (var definition in definitions)
+        for (var definitionIndex = 0; definitionIndex < profile.Definitions.Count; definitionIndex++)
         {
+            var definition = profile.Definitions[definitionIndex];
+            var expectedCount = profile.ExpectedMatchCounts[definitionIndex];
             var matches = WildcardPattern.FindAll(patched, definition.OriginalPattern);
-            if (matches.Count != definition.ExpectedMatchCount)
+            if (matches.Count != expectedCount)
             {
                 throw new InvalidDataException(
-                    $"{definition.Name} no longer has {definition.ExpectedMatchCount} original matches.");
+                    $"{definition.Name} no longer has {expectedCount} original matches.");
             }
 
             foreach (var match in matches)

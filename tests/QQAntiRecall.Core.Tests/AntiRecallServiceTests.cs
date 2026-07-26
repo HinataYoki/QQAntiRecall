@@ -31,9 +31,9 @@ public sealed class AntiRecallServiceTests
 
         var ready = await service.ScanAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
         Assert.Equal(TargetPatchState.ReadyToInstall, Assert.Single(ready.Targets).State);
-        Assert.All(ready.Targets[0].Signatures.Zip(PatchCatalog.Definitions), pair =>
+        Assert.All(ready.Targets[0].Signatures.Zip(PatchCatalog.DefaultProfile.ExpectedMatchCounts), pair =>
         {
-            Assert.Equal(pair.Second.ExpectedMatchCount, pair.First.OriginalMatchCount);
+            Assert.Equal(pair.Second, pair.First.OriginalMatchCount);
             Assert.Equal(0, pair.First.PatchedMatchCount);
         });
 
@@ -43,7 +43,7 @@ public sealed class AntiRecallServiceTests
         var duplicateScan = await service.ScanAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
         Assert.Equal(TargetPatchState.Inconsistent, Assert.Single(duplicateScan.Targets).State);
         Assert.Equal(
-            PatchCatalog.Definitions[0].ExpectedMatchCount + 1,
+            PatchCatalog.DefaultProfile.ExpectedMatchCounts[0] + 1,
             duplicateScan.Targets[0].Signatures[0].OriginalMatchCount);
 
         File.WriteAllBytes(targetPath, TestBinary.CreateOriginal(PatchCatalog.Definitions.Take(2)));
@@ -57,6 +57,72 @@ public sealed class AntiRecallServiceTests
         File.Delete(targetPath);
         var missingScan = await service.ScanAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
         Assert.Equal(TargetPatchState.Missing, Assert.Single(missingScan.Targets).State);
+    }
+
+    /// <summary>
+    /// Verifies every built-in code-layout profile completes the full install and restore lifecycle.
+    /// </summary>
+    [Fact]
+    public async Task InstallAndRestoreAsync_AcceptsEveryBuiltInPatchProfile()
+    {
+        foreach (var profile in PatchCatalog.Profiles)
+        {
+            using var workspace = new TestWorkspace();
+            var targetPath = workspace.CreateInstall(profile.Name).Single();
+            File.WriteAllBytes(targetPath, TestBinary.CreateOriginal(profile: profile));
+            var service = workspace.CreateService();
+
+            var ready = await service.ScanAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
+            var readyTarget = Assert.Single(ready.Targets);
+            Assert.Equal(TargetPatchState.ReadyToInstall, readyTarget.State);
+            Assert.Contains(profile.Name, readyTarget.Detail);
+            Assert.Equal(profile.ExpectedMatchCounts, readyTarget.Signatures.Select(status => status.OriginalMatchCount));
+
+            var installed = await service.InstallAsync(
+                workspace.InstallRoot,
+                TestContext.Current.CancellationToken);
+            var installedTarget = Assert.Single(installed.Scan.Targets);
+            Assert.True(installed.Succeeded);
+            Assert.Equal(TargetPatchState.Installed, installedTarget.State);
+            Assert.Contains(profile.Name, installedTarget.Detail);
+            Assert.Equal(profile.ExpectedMatchCounts, installedTarget.Signatures.Select(status => status.PatchedMatchCount));
+
+            var restored = await service.RestoreAsync(
+                workspace.InstallRoot,
+                TestContext.Current.CancellationToken);
+            Assert.True(restored.Succeeded);
+            Assert.Equal(TargetPatchState.ReadyToInstall, Assert.Single(restored.Scan.Targets).State);
+        }
+    }
+
+    /// <summary>
+    /// Verifies current and ready QQ targets can use different layouts in one transaction.
+    /// </summary>
+    [Fact]
+    public async Task InstallAndRestoreAsync_AcceptsMixedProfilesAcrossConfiguredTargets()
+    {
+        using var workspace = new TestWorkspace();
+        var targetPaths = workspace.CreateInstall("current", "ready");
+        var selectedProfiles = PatchCatalog.Profiles.Take(targetPaths.Count).ToArray();
+        Assert.Equal(targetPaths.Count, selectedProfiles.Length);
+        for (var index = 0; index < targetPaths.Count; index++)
+        {
+            File.WriteAllBytes(targetPaths[index], TestBinary.CreateOriginal(profile: selectedProfiles[index]));
+        }
+
+        var service = workspace.CreateService();
+        var installed = await service.InstallAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
+
+        Assert.True(installed.Succeeded);
+        Assert.All(installed.Scan.Targets, target => Assert.Equal(TargetPatchState.Installed, target.State));
+        Assert.Equal(
+            selectedProfiles.Select(profile => profile.Name),
+            installed.Scan.Targets.Select(target =>
+                selectedProfiles.Single(profile => target.Detail.Contains(profile.Name, StringComparison.Ordinal)).Name));
+
+        var restored = await service.RestoreAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
+        Assert.True(restored.Succeeded);
+        Assert.All(restored.Scan.Targets, target => Assert.Equal(TargetPatchState.ReadyToInstall, target.State));
     }
 
     /// <summary>
@@ -146,7 +212,7 @@ public sealed class AntiRecallServiceTests
         {
             Assert.Empty(WildcardPattern.FindAll(upgradedBytes, definition.OriginalPattern));
             Assert.Equal(
-                definition.ExpectedMatchCount,
+                PatchCatalog.DefaultProfile.GetExpectedMatchCount(definition),
                 WildcardPattern.FindAll(upgradedBytes, definition.PatchedPattern).Count);
         });
 
@@ -219,7 +285,8 @@ public sealed class AntiRecallServiceTests
         await service.InstallAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
         var mixed = TestBinary.ApplyDefinitions(
             File.ReadAllBytes(targetPath),
-            [PatchCatalog.LegacyDefinitions[0]]);
+            [PatchCatalog.LegacyDefinitions[0]],
+            PatchCatalog.LegacyProfile);
         File.WriteAllBytes(targetPath, mixed);
 
         var scan = await service.ScanAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
@@ -763,7 +830,10 @@ internal sealed class TestWorkspace : IDisposable
     {
         var targetPath = CreateInstall(version).Single();
         var original = File.ReadAllBytes(targetPath);
-        var patched = TestBinary.ApplyDefinitions(original, PatchCatalog.LegacyDefinitions);
+        var patched = TestBinary.ApplyDefinitions(
+            original,
+            PatchCatalog.LegacyDefinitions,
+            PatchCatalog.LegacyProfile);
         File.WriteAllBytes(targetPath, patched);
 
         const string backupId = "legacy-0.0.1-backup";
@@ -832,13 +902,16 @@ internal static class TestBinary
     /// <summary>
     /// Creates an original-state file with padding around each requested signature.
     /// </summary>
-    internal static byte[] CreateOriginal(IEnumerable<PatchDefinition>? definitions = null)
+    internal static byte[] CreateOriginal(
+        IEnumerable<PatchDefinition>? definitions = null,
+        PatchProfile? profile = null)
     {
+        profile ??= PatchCatalog.DefaultProfile;
         var selectedDefinitions = (definitions ?? PatchCatalog.Definitions).ToArray();
         var bytes = new List<byte>(Enumerable.Repeat((byte)0xCC, 32));
         foreach (var definition in selectedDefinitions)
         {
-            for (var match = 0; match < definition.ExpectedMatchCount; match++)
+            for (var match = 0; match < profile.GetExpectedMatchCount(definition); match++)
             {
                 bytes.AddRange(Materialize(definition.OriginalPattern));
                 bytes.AddRange(Enumerable.Repeat((byte)0xCC, 32));
@@ -875,18 +948,22 @@ internal static class TestBinary
     }
 
     /// <summary>
-    /// Applies every definition at its declared number of original matches to a cloned byte array.
+    /// Applies selected definitions at the exact counts declared by their owning profile.
     /// </summary>
-    internal static byte[] ApplyDefinitions(byte[] source, IEnumerable<PatchDefinition> definitions)
+    internal static byte[] ApplyDefinitions(
+        byte[] source,
+        IEnumerable<PatchDefinition> definitions,
+        PatchProfile profile)
     {
         var patched = (byte[])source.Clone();
         foreach (var definition in definitions)
         {
+            var expectedCount = profile.GetExpectedMatchCount(definition);
             var matches = WildcardPattern.FindAll(patched, definition.OriginalPattern);
-            if (matches.Count != definition.ExpectedMatchCount)
+            if (matches.Count != expectedCount)
             {
                 throw new InvalidDataException(
-                    $"Expected {definition.ExpectedMatchCount} matches for {definition.Name}, found {matches.Count}.");
+                    $"Expected {expectedCount} matches for {definition.Name}, found {matches.Count}.");
             }
 
             foreach (var match in matches)
