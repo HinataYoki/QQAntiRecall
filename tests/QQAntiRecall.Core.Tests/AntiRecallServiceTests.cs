@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace QQAntiRecall.Core.Tests;
@@ -29,10 +31,10 @@ public sealed class AntiRecallServiceTests
 
         var ready = await service.ScanAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
         Assert.Equal(TargetPatchState.ReadyToInstall, Assert.Single(ready.Targets).State);
-        Assert.All(ready.Targets[0].Signatures, signature =>
+        Assert.All(ready.Targets[0].Signatures.Zip(PatchCatalog.Definitions), pair =>
         {
-            Assert.Equal(1, signature.OriginalMatchCount);
-            Assert.Equal(0, signature.PatchedMatchCount);
+            Assert.Equal(pair.Second.ExpectedMatchCount, pair.First.OriginalMatchCount);
+            Assert.Equal(0, pair.First.PatchedMatchCount);
         });
 
         var duplicate = TestBinary.CreateOriginal();
@@ -40,7 +42,9 @@ public sealed class AntiRecallServiceTests
         File.WriteAllBytes(targetPath, duplicate);
         var duplicateScan = await service.ScanAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
         Assert.Equal(TargetPatchState.Inconsistent, Assert.Single(duplicateScan.Targets).State);
-        Assert.Equal(2, duplicateScan.Targets[0].Signatures[0].OriginalMatchCount);
+        Assert.Equal(
+            PatchCatalog.Definitions[0].ExpectedMatchCount + 1,
+            duplicateScan.Targets[0].Signatures[0].OriginalMatchCount);
 
         File.WriteAllBytes(targetPath, TestBinary.CreateOriginal(PatchCatalog.Definitions.Take(2)));
         var partialScan = await service.ScanAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
@@ -106,6 +110,123 @@ public sealed class AntiRecallServiceTests
         {
             Assert.Equal(originals[targetPath], File.ReadAllBytes(targetPath));
         }
+    }
+
+    /// <summary>
+    /// Verifies a complete 0.0.1 installation upgrades from its exact backup and restores the local-recall code path.
+    /// </summary>
+    [Fact]
+    public async Task InstallAsync_UpgradesLegacyPatchWithoutBlockingLocalRecall()
+    {
+        using var workspace = new TestWorkspace();
+        var legacy = workspace.CreateLegacyInstalledWithBackup("current");
+        var service = workspace.CreateService();
+
+        var legacyScan = await service.ScanAsync(
+            workspace.InstallRoot,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(TargetPatchState.LegacyInstalled, Assert.Single(legacyScan.Targets).State);
+        Assert.True(legacyScan.CanInstall);
+        Assert.True(legacyScan.CanRestore);
+        Assert.Equal(legacy.BackupId, legacyScan.LatestBackupId);
+
+        var upgraded = await service.InstallAsync(
+            workspace.InstallRoot,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(upgraded.Succeeded);
+        Assert.Contains("旧版补丁已升级", upgraded.Message);
+        Assert.Equal(TargetPatchState.Installed, Assert.Single(upgraded.Scan.Targets).State);
+        var upgradedBytes = File.ReadAllBytes(legacy.TargetPath);
+        var legacyNormal = PatchCatalog.LegacyDefinitions[0];
+        Assert.Single(WildcardPattern.FindAll(upgradedBytes, legacyNormal.OriginalPattern));
+        Assert.Empty(WildcardPattern.FindAll(upgradedBytes, legacyNormal.PatchedPattern));
+        Assert.All(PatchCatalog.Definitions.Take(3), definition =>
+        {
+            Assert.Empty(WildcardPattern.FindAll(upgradedBytes, definition.OriginalPattern));
+            Assert.Equal(
+                definition.ExpectedMatchCount,
+                WildcardPattern.FindAll(upgradedBytes, definition.PatchedPattern).Count);
+        });
+
+        var cleanup = await service.PreviewBackupCleanupAsync(
+            workspace.InstallRoot,
+            TestContext.Current.CancellationToken);
+        Assert.Contains(legacy.BackupId, cleanup.BackupIds);
+        Assert.Equal(1, cleanup.RetainedBackupCount);
+        Assert.Equal(0, cleanup.UnrecognizedDirectoryCount);
+
+        var restored = await service.RestoreAsync(
+            workspace.InstallRoot,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(restored.Succeeded);
+        Assert.Equal(legacy.Original, File.ReadAllBytes(legacy.TargetPath));
+    }
+
+    /// <summary>
+    /// Verifies normal-recall replacements are anchored to QQ's explicit server-notification flag.
+    /// </summary>
+    [Fact]
+    public void PatchCatalog_NormalRecallDefinitionsRequireNotificationFlag()
+    {
+        byte?[] notificationFlag = [0xC6, 0x44, 0x24, 0x28, 0x01];
+        byte?[] localOperationFlag = [0xC6, 0x44, 0x24, 0x28, 0x00];
+
+        Assert.All(PatchCatalog.Definitions.Take(3), definition =>
+        {
+            var materialized = TestBinary.Materialize(definition.OriginalPattern);
+            Assert.NotEmpty(WildcardPattern.FindAll(materialized, notificationFlag));
+            Assert.Empty(WildcardPattern.FindAll(materialized, localOperationFlag));
+            Assert.Equal(new byte[] { 0x90, 0x90, 0x90, 0x90, 0x90 }, definition.Replacement);
+        });
+    }
+
+    /// <summary>
+    /// Verifies a matching notification-call shape is rejected when it no longer targets QQ's normal-recall function.
+    /// </summary>
+    [Fact]
+    public async Task ScanAsync_RejectsNormalRecallCallWithUnexpectedTarget()
+    {
+        using var workspace = new TestWorkspace();
+        var targetPath = workspace.CreateInstall("current").Single();
+        var content = File.ReadAllBytes(targetPath);
+        var definition = PatchCatalog.Definitions[0];
+        var match = Assert.Single(WildcardPattern.FindAll(content, definition.OriginalPattern));
+        BinaryPrimitives.WriteInt32LittleEndian(
+            content.AsSpan(match + definition.PatchOffset + 1, sizeof(int)),
+            0);
+        File.WriteAllBytes(targetPath, content);
+
+        var scan = await workspace.CreateService().ScanAsync(
+            workspace.InstallRoot,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(TargetPatchState.Inconsistent, Assert.Single(scan.Targets).State);
+        Assert.False(scan.CanInstall);
+    }
+
+    /// <summary>
+    /// Verifies notification-call patches are not reported as complete while the legacy local-operation patch remains.
+    /// </summary>
+    [Fact]
+    public async Task ScanAsync_RejectsCurrentCallsCombinedWithLegacyFunctionPatch()
+    {
+        using var workspace = new TestWorkspace();
+        var targetPath = workspace.CreateInstall("current").Single();
+        var service = workspace.CreateService();
+        await service.InstallAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
+        var mixed = TestBinary.ApplyDefinitions(
+            File.ReadAllBytes(targetPath),
+            [PatchCatalog.LegacyDefinitions[0]]);
+        File.WriteAllBytes(targetPath, mixed);
+
+        var scan = await service.ScanAsync(workspace.InstallRoot, TestContext.Current.CancellationToken);
+
+        Assert.Equal(TargetPatchState.Inconsistent, Assert.Single(scan.Targets).State);
+        Assert.False(scan.CanInstall);
+        Assert.False(scan.CanRestore);
     }
 
     /// <summary>
@@ -636,6 +757,46 @@ internal sealed class TestWorkspace : IDisposable
     }
 
     /// <summary>
+    /// Creates a complete 0.0.1 patched target and the exact original backup required for migration tests.
+    /// </summary>
+    internal (string TargetPath, byte[] Original, string BackupId) CreateLegacyInstalledWithBackup(string version)
+    {
+        var targetPath = CreateInstall(version).Single();
+        var original = File.ReadAllBytes(targetPath);
+        var patched = TestBinary.ApplyDefinitions(original, PatchCatalog.LegacyDefinitions);
+        File.WriteAllBytes(targetPath, patched);
+
+        const string backupId = "legacy-0.0.1-backup";
+        var backupDirectory = Path.Combine(BackupRoot, backupId);
+        var filesDirectory = Path.Combine(backupDirectory, "files");
+        Directory.CreateDirectory(filesDirectory);
+        File.WriteAllBytes(Path.Combine(filesDirectory, "000.wrapper.node"), original);
+        var manifest = new
+        {
+            SchemaVersion = 1,
+            BackupId = backupId,
+            CreatedUtc = Runtime.UtcNowValue.AddMinutes(-1),
+            InstallRoot,
+            Targets = new[]
+            {
+                new
+                {
+                    Version = version,
+                    RelativePath = Path.GetRelativePath(InstallRoot, targetPath).Replace('\\', '/'),
+                    BackupFileName = "files/000.wrapper.node",
+                    OriginalSha256 = Convert.ToHexString(SHA256.HashData(original)),
+                    PatchedSha256 = Convert.ToHexString(SHA256.HashData(patched)),
+                },
+            },
+        };
+        File.WriteAllText(
+            Path.Combine(backupDirectory, "manifest.json"),
+            JsonSerializer.Serialize(manifest));
+
+        return (targetPath, original, backupId);
+    }
+
+    /// <summary>
     /// Writes current and ready version properties exactly as QQ's version config does.
     /// </summary>
     internal void WriteConfig(string? currentVersion, string? readyVersion)
@@ -673,14 +834,36 @@ internal static class TestBinary
     /// </summary>
     internal static byte[] CreateOriginal(IEnumerable<PatchDefinition>? definitions = null)
     {
+        var selectedDefinitions = (definitions ?? PatchCatalog.Definitions).ToArray();
         var bytes = new List<byte>(Enumerable.Repeat((byte)0xCC, 32));
-        foreach (var definition in definitions ?? PatchCatalog.Definitions)
+        foreach (var definition in selectedDefinitions)
         {
-            bytes.AddRange(Materialize(definition.OriginalPattern));
-            bytes.AddRange(Enumerable.Repeat((byte)0xCC, 32));
+            for (var match = 0; match < definition.ExpectedMatchCount; match++)
+            {
+                bytes.AddRange(Materialize(definition.OriginalPattern));
+                bytes.AddRange(Enumerable.Repeat((byte)0xCC, 32));
+            }
         }
 
-        return bytes.ToArray();
+        bytes.AddRange(Materialize(PatchCatalog.LegacyDefinitions[0].OriginalPattern));
+        bytes.AddRange(Enumerable.Repeat((byte)0xCC, 32));
+        var content = bytes.ToArray();
+        var normalRecallSignature = Assert.Single(WildcardPattern.FindAll(
+            content,
+            PatchCatalog.LegacyDefinitions[0].OriginalPattern));
+        var normalRecallFunction = normalRecallSignature - 0x26;
+        foreach (var definition in selectedDefinitions.Intersect(PatchCatalog.Definitions.Take(3)))
+        {
+            foreach (var match in WildcardPattern.FindAll(content, definition.OriginalPattern))
+            {
+                var callOffset = match + definition.PatchOffset;
+                BinaryPrimitives.WriteInt32LittleEndian(
+                    content.AsSpan(callOffset + 1, sizeof(int)),
+                    normalRecallFunction - (callOffset + 5));
+            }
+        }
+
+        return content;
     }
 
     /// <summary>
@@ -689,6 +872,30 @@ internal static class TestBinary
     internal static byte[] Materialize(IReadOnlyList<byte?> pattern)
     {
         return pattern.Select((value, index) => value ?? (byte)(0xA0 + (index % 31))).ToArray();
+    }
+
+    /// <summary>
+    /// Applies every definition at its declared number of original matches to a cloned byte array.
+    /// </summary>
+    internal static byte[] ApplyDefinitions(byte[] source, IEnumerable<PatchDefinition> definitions)
+    {
+        var patched = (byte[])source.Clone();
+        foreach (var definition in definitions)
+        {
+            var matches = WildcardPattern.FindAll(patched, definition.OriginalPattern);
+            if (matches.Count != definition.ExpectedMatchCount)
+            {
+                throw new InvalidDataException(
+                    $"Expected {definition.ExpectedMatchCount} matches for {definition.Name}, found {matches.Count}.");
+            }
+
+            foreach (var match in matches)
+            {
+                definition.Replacement.CopyTo(patched, match + definition.PatchOffset);
+            }
+        }
+
+        return patched;
     }
 }
 

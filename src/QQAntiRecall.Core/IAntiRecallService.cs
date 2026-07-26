@@ -8,6 +8,7 @@ public enum TargetPatchState
     Missing,
     ReadyToInstall,
     Installed,
+    LegacyInstalled,
     Inconsistent,
     Unsupported,
 }
@@ -98,7 +99,7 @@ public interface IAntiRecallService
     Task<AntiRecallScanResult> ScanAsync(string installRoot, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Installs the complete three-signature patch set as one transactional operation.
+    /// Installs the complete patch set, or upgrades the recognized legacy patch, as one transactional operation.
     /// </summary>
     Task<PatchOperationResult> InstallAsync(string installRoot, CancellationToken cancellationToken = default);
 

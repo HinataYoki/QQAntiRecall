@@ -176,7 +176,7 @@ public sealed class MainWindowTests
                 new PatchSignatureStatus("群聊撤回", 0, 1),
                 new PatchSignatureStatus("撤回提示", 0, 1),
             ],
-            "三个补丁签名均唯一匹配。")));
+            "五组补丁签名完整匹配。")));
         return viewModel;
     }
 

@@ -101,19 +101,20 @@ public sealed partial class AntiRecallService : IAntiRecallService
 
         var allReady = results.Length > 0 && results.All(target => target.State == TargetPatchState.ReadyToInstall);
         var allInstalled = results.Length > 0 && results.All(target => target.State == TargetPatchState.Installed);
+        var allLegacy = results.Length > 0 && results.All(target => target.State == TargetPatchState.LegacyInstalled);
         return new AntiRecallScanResult(
             normalizedRoot,
             IsPlatformSupported: true,
             isRunning,
             results,
             compatibleBackup?.Manifest.BackupId,
-            CanInstall: !isRunning && allReady,
-            CanRestore: !isRunning && allInstalled && compatibleBackup is not null,
+            CanInstall: !isRunning && (allReady || (allLegacy && compatibleBackup is not null)),
+            CanRestore: !isRunning && (allInstalled || allLegacy) && compatibleBackup is not null,
             BuildScanSummary(results, snapshotSet.Error, isRunning, compatibleBackup is not null));
     }
 
     /// <summary>
-    /// Atomically installs all three signatures after exact preflight and backup; running QQ and mixed target states are rejected.
+    /// Atomically installs every signature or upgrades the recognized legacy set after exact preflight and backup.
     /// </summary>
     public async Task<PatchOperationResult> InstallAsync(
         string installRoot,
@@ -145,20 +146,68 @@ public sealed partial class AntiRecallService : IAntiRecallService
             }
 
             var snapshotSet = await LoadTargetSnapshotsAsync(initialScan.InstallRoot, cancellationToken).ConfigureAwait(false);
-            if (snapshotSet.Targets.Count == 0
-                || snapshotSet.Targets.Any(target => target.Result.State != TargetPatchState.ReadyToInstall || target.Content is null))
+            var installsOriginal = snapshotSet.Targets.Count > 0
+                && snapshotSet.Targets.All(target =>
+                    target.Result.State == TargetPatchState.ReadyToInstall && target.Content is not null);
+            var upgradesLegacy = snapshotSet.Targets.Count > 0
+                && snapshotSet.Targets.All(target =>
+                    target.Result.State == TargetPatchState.LegacyInstalled && target.Content is not null);
+            if (!installsOriginal && !upgradesLegacy)
             {
                 var changedScan = await ScanAsync(initialScan.InstallRoot, cancellationToken).ConfigureAwait(false);
                 return new PatchOperationResult(changedScan, "安装已拒绝：预检后目标状态发生变化。");
             }
 
-            var replacementPlans = snapshotSet.Targets.Select(CreateInstallPlan).ToArray();
+            IReadOnlyList<TargetSnapshot> backupSnapshots = snapshotSet.Targets;
+            ReplacementPlan[] replacementPlans;
+            if (upgradesLegacy)
+            {
+                var legacyBackup = await FindLatestCompatibleBackupAsync(
+                    initialScan.InstallRoot,
+                    snapshotSet.Targets,
+                    cancellationToken).ConfigureAwait(false);
+                if (legacyBackup is null)
+                {
+                    var failedScan = await ScanAsync(initialScan.InstallRoot, cancellationToken).ConfigureAwait(false);
+                    return new PatchOperationResult(failedScan, "升级已拒绝：找不到与 0.0.1 补丁哈希匹配的原始备份。");
+                }
+
+                try
+                {
+                    backupSnapshots = await CreateOriginalSnapshotsFromBackupAsync(
+                        snapshotSet.Targets,
+                        legacyBackup,
+                        cancellationToken).ConfigureAwait(false);
+                    replacementPlans = backupSnapshots
+                        .Zip(snapshotSet.Targets, (original, live) =>
+                        {
+                            var plan = CreateInstallPlan(original);
+                            return plan with { ExpectedCurrentSha256 = live.Result.Sha256 };
+                        })
+                        .ToArray();
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception) when (exception is
+                    IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                    var failedScan = await ScanAsync(initialScan.InstallRoot, cancellationToken).ConfigureAwait(false);
+                    return new PatchOperationResult(failedScan, $"升级已拒绝：旧版原始备份验证失败。{exception.Message}");
+                }
+            }
+            else
+            {
+                replacementPlans = snapshotSet.Targets.Select(CreateInstallPlan).ToArray();
+            }
+
             BackupCandidate backup;
             try
             {
                 backup = await CreateBackupAsync(
                     initialScan.InstallRoot,
-                    snapshotSet.Targets,
+                    backupSnapshots,
                     replacementPlans,
                     cancellationToken).ConfigureAwait(false);
             }
@@ -184,7 +233,9 @@ public sealed partial class AntiRecallService : IAntiRecallService
 
             return new PatchOperationResult(
                 finalScan,
-                $"防撤回已安装，备份编号：{backup.Manifest.BackupId}。",
+                upgradesLegacy
+                    ? $"0.0.1 旧版补丁已升级，备份编号：{backup.Manifest.BackupId}。"
+                    : $"防撤回已安装，备份编号：{backup.Manifest.BackupId}。",
                 Succeeded: true);
         }
         finally
@@ -213,8 +264,11 @@ public sealed partial class AntiRecallService : IAntiRecallService
                 "安装已拒绝：所选目录未通过 QQ.exe 和版本配置校验，因此不会关闭 QQ。");
         }
 
-        if (initialScan.Targets.Count == 0
-            || initialScan.Targets.Any(target => target.State != TargetPatchState.ReadyToInstall))
+        var canInstallAfterStop = initialScan.Targets.Count > 0
+            && (initialScan.Targets.All(target => target.State == TargetPatchState.ReadyToInstall)
+                || (initialScan.Targets.All(target => target.State == TargetPatchState.LegacyInstalled)
+                    && initialScan.LatestBackupId is not null));
+        if (!canInstallAfterStop)
         {
             return new PatchOperationResult(
                 initialScan,
@@ -458,16 +512,18 @@ public sealed partial class AntiRecallService : IAntiRecallService
         CancellationToken cancellationToken)
     {
         var normalizedRoot = NormalizeInstallRoot(installRoot);
-        var configuredTargets = await ReadConfiguredTargetsAsync(normalizedRoot, cancellationToken).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(configuredTargets.Error))
+        var snapshotSet = await LoadTargetSnapshotsAsync(normalizedRoot, cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(snapshotSet.Error))
         {
-            throw new InvalidOperationException($"无法确定当前 QQ 版本，未清理任何备份。{configuredTargets.Error}");
+            throw new InvalidOperationException($"无法确定当前 QQ 版本，未清理任何备份。{snapshotSet.Error}");
         }
 
-        if (configuredTargets.Targets.Count == 0)
+        if (snapshotSet.Targets.Count == 0)
         {
             throw new InvalidOperationException("无法确定当前 QQ 版本，未清理任何备份。");
         }
+
+        var configuredTargets = snapshotSet.Targets.Select(snapshot => snapshot.Target).ToArray();
 
         if (!Directory.Exists(_backupRoot))
         {
@@ -517,7 +573,7 @@ public sealed partial class AntiRecallService : IAntiRecallService
                 continue;
             }
 
-            if (!HasExactTargetSet(candidate.Backup.Manifest.Targets, configuredTargets.Targets))
+            if (!HasExactTargetSet(candidate.Backup.Manifest.Targets, configuredTargets))
             {
                 removable.Add(candidate);
                 continue;
@@ -526,16 +582,36 @@ public sealed partial class AntiRecallService : IAntiRecallService
             currentTargetBackups.Add(candidate);
         }
 
-        var retainedRestoreIdentities = new List<ManagedBackupCandidate>();
-        foreach (var candidate in currentTargetBackups.OrderByDescending(item => item.Backup.Manifest.CreatedUtc))
+        var pending = currentTargetBackups
+            .OrderByDescending(item => item.Backup.Manifest.CreatedUtc)
+            .ToList();
+        while (pending.Count > 0)
         {
-            if (retainedRestoreIdentities.Any(retained => HaveEquivalentRestoreBytes(retained.Backup.Manifest, candidate.Backup.Manifest)))
+            var seed = pending[0];
+            var equivalentOriginals = pending.Where(candidate =>
+                HaveEquivalentOriginalBytes(seed.Backup.Manifest, candidate.Backup.Manifest)).ToArray();
+            pending.RemoveAll(candidate => equivalentOriginals.Contains(candidate));
+
+            var compatibleWithLiveTargets = equivalentOriginals.Where(candidate =>
+                HasLivePatchedHashes(candidate.Backup.Manifest, snapshotSet.Targets)).ToArray();
+            if (compatibleWithLiveTargets.Length > 0)
             {
-                removable.Add(candidate);
+                removable.AddRange(equivalentOriginals.Except([compatibleWithLiveTargets[0]]));
+                continue;
             }
-            else
+
+            var retainedPatchVariants = new List<ManagedBackupCandidate>();
+            foreach (var candidate in equivalentOriginals)
             {
-                retainedRestoreIdentities.Add(candidate);
+                if (retainedPatchVariants.Any(retained =>
+                    HaveEquivalentRestoreBytes(retained.Backup.Manifest, candidate.Backup.Manifest)))
+                {
+                    removable.Add(candidate);
+                }
+                else
+                {
+                    retainedPatchVariants.Add(candidate);
+                }
             }
         }
 
@@ -628,7 +704,15 @@ public sealed partial class AntiRecallService : IAntiRecallService
                 }
 
                 var generatedPatch = CreateInstallPlan(new TargetSnapshot(configuredTarget, originalResult, content));
-                if (!string.Equals(generatedPatch.NewSha256, target.PatchedSha256, StringComparison.OrdinalIgnoreCase))
+                var currentPatchMatches = string.Equals(
+                    generatedPatch.NewSha256,
+                    target.PatchedSha256,
+                    StringComparison.OrdinalIgnoreCase);
+                if (!currentPatchMatches
+                    && !string.Equals(
+                        ComputeSha256(ApplyPatchDefinitions(content, PatchCatalog.LegacyDefinitions)),
+                        target.PatchedSha256,
+                        StringComparison.OrdinalIgnoreCase))
                 {
                     return null;
                 }
@@ -686,6 +770,57 @@ public sealed partial class AntiRecallService : IAntiRecallService
             if (matches.Length != 1
                 || !string.Equals(matches[0].OriginalSha256, leftTarget.OriginalSha256, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(matches[0].PatchedSha256, leftTarget.PatchedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Determines whether two backups restore identical original bytes for every target identity.
+    /// </summary>
+    private static bool HaveEquivalentOriginalBytes(BackupManifest left, BackupManifest right)
+    {
+        if (left.Targets.Count != right.Targets.Count)
+        {
+            return false;
+        }
+
+        foreach (var leftTarget in left.Targets)
+        {
+            var matches = right.Targets.Where(rightTarget =>
+                string.Equals(rightTarget.Version, leftTarget.Version, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(rightTarget.RelativePath, leftTarget.RelativePath, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (matches.Length != 1
+                || !string.Equals(matches[0].OriginalSha256, leftTarget.OriginalSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Checks whether a backup manifest was created for the exact hashes currently installed in every target.
+    /// </summary>
+    private static bool HasLivePatchedHashes(
+        BackupManifest manifest,
+        IReadOnlyList<TargetSnapshot> liveSnapshots)
+    {
+        if (manifest.Targets.Count != liveSnapshots.Count)
+        {
+            return false;
+        }
+
+        foreach (var snapshot in liveSnapshots)
+        {
+            var target = FindUniqueManifestTarget(manifest.Targets, snapshot.Target);
+            if (target is null
+                || string.IsNullOrWhiteSpace(snapshot.Result.Sha256)
+                || !string.Equals(target.PatchedSha256, snapshot.Result.Sha256, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
@@ -866,20 +1001,31 @@ public sealed partial class AntiRecallService : IAntiRecallService
                 WildcardPattern.FindAll(content, definition.PatchedPattern).Count))
             .ToArray();
 
-        var allOriginal = statuses.All(status => status.OriginalMatchCount == 1 && status.PatchedMatchCount == 0);
-        var allPatched = statuses.All(status => status.OriginalMatchCount == 0 && status.PatchedMatchCount == 1);
+        var allOriginal = statuses.Zip(PatchCatalog.Definitions).All(pair =>
+                pair.First.OriginalMatchCount == pair.Second.ExpectedMatchCount
+                && pair.First.PatchedMatchCount == 0)
+            && PatchCatalog.HasValidNormalRecallCallTargets(content);
+        var allPatched = statuses.Zip(PatchCatalog.Definitions).All(pair =>
+                pair.First.OriginalMatchCount == 0
+                && pair.First.PatchedMatchCount == pair.Second.ExpectedMatchCount)
+            && PatchCatalog.HasUnmodifiedNormalRecallFunction(content);
+        var legacyInstalled = PatchCatalog.IsLegacyInstalled(content)
+            && PatchCatalog.HasValidNormalRecallCallTargets(content);
         var noKnownSignature = statuses.All(status => status.OriginalMatchCount == 0 && status.PatchedMatchCount == 0);
         var state = allOriginal
             ? TargetPatchState.ReadyToInstall
             : allPatched
                 ? TargetPatchState.Installed
-                : noKnownSignature
-                    ? TargetPatchState.Unsupported
-                    : TargetPatchState.Inconsistent;
+                : legacyInstalled
+                    ? TargetPatchState.LegacyInstalled
+                    : noKnownSignature
+                        ? TargetPatchState.Unsupported
+                        : TargetPatchState.Inconsistent;
         var detail = state switch
         {
-            TargetPatchState.ReadyToInstall => "三个原始签名均唯一匹配。",
-            TargetPatchState.Installed => "三个补丁签名均唯一匹配。",
+            TargetPatchState.ReadyToInstall => $"{PatchCatalog.Definitions.Count} 组原始签名完整匹配。",
+            TargetPatchState.Installed => $"{PatchCatalog.Definitions.Count} 组补丁签名完整匹配。",
+            TargetPatchState.LegacyInstalled => "检测到 0.0.1 旧版补丁；可从原备份安全升级或恢复。",
             TargetPatchState.Unsupported => "未匹配到受支持的 QQ 签名。",
             _ => "签名缺失、重复，或原始与补丁状态混合。",
         };
@@ -908,23 +1054,12 @@ public sealed partial class AntiRecallService : IAntiRecallService
     }
 
     /// <summary>
-    /// Creates patched bytes only after re-confirming each original signature has one match.
+    /// Creates patched bytes only after re-confirming every original signature has its required match count.
     /// </summary>
     private static ReplacementPlan CreateInstallPlan(TargetSnapshot snapshot)
     {
         var original = snapshot.Content ?? throw new InvalidOperationException("Target content was not loaded.");
-        var patched = (byte[])original.Clone();
-        foreach (var definition in PatchCatalog.Definitions)
-        {
-            var matches = WildcardPattern.FindAll(patched, definition.OriginalPattern);
-            if (matches.Count != 1)
-            {
-                throw new InvalidDataException($"{definition.Name} no longer has one original match.");
-            }
-
-            definition.Replacement.CopyTo(patched, matches[0] + definition.PatchOffset);
-        }
-
+        var patched = ApplyPatchDefinitions(original, PatchCatalog.Definitions);
         var patchedResult = AnalyzeTarget(snapshot.Target, patched);
         if (patchedResult.State != TargetPatchState.Installed)
         {
@@ -936,6 +1071,32 @@ public sealed partial class AntiRecallService : IAntiRecallService
             snapshot.Result.Sha256,
             patchedResult.Sha256,
             patched);
+    }
+
+    /// <summary>
+    /// Applies one complete catalog to a clone after validating every declared original match count.
+    /// </summary>
+    private static byte[] ApplyPatchDefinitions(
+        byte[] original,
+        IReadOnlyList<PatchDefinition> definitions)
+    {
+        var patched = (byte[])original.Clone();
+        foreach (var definition in definitions)
+        {
+            var matches = WildcardPattern.FindAll(patched, definition.OriginalPattern);
+            if (matches.Count != definition.ExpectedMatchCount)
+            {
+                throw new InvalidDataException(
+                    $"{definition.Name} no longer has {definition.ExpectedMatchCount} original matches.");
+            }
+
+            foreach (var match in matches)
+            {
+                definition.Replacement.CopyTo(patched, match + definition.PatchOffset);
+            }
+        }
+
+        return patched;
     }
 
     /// <summary>
@@ -1022,8 +1183,10 @@ public sealed partial class AntiRecallService : IAntiRecallService
         IReadOnlyList<TargetSnapshot> snapshots,
         CancellationToken cancellationToken)
     {
+        var state = snapshots.FirstOrDefault()?.Result.State;
         if (snapshots.Count == 0
-            || snapshots.Any(snapshot => snapshot.Result.State != TargetPatchState.Installed)
+            || state is not (TargetPatchState.Installed or TargetPatchState.LegacyInstalled)
+            || snapshots.Any(snapshot => snapshot.Result.State != state)
             || !Directory.Exists(_backupRoot))
         {
             return null;
@@ -1068,6 +1231,30 @@ public sealed partial class AntiRecallService : IAntiRecallService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Loads the exact original files from a compatible legacy backup for a transactional patch upgrade.
+    /// </summary>
+    private static async Task<TargetSnapshot[]> CreateOriginalSnapshotsFromBackupAsync(
+        IReadOnlyList<TargetSnapshot> liveSnapshots,
+        BackupCandidate backup,
+        CancellationToken cancellationToken)
+    {
+        var restorePlans = await CreateRestorePlansAsync(
+            liveSnapshots,
+            backup,
+            cancellationToken).ConfigureAwait(false);
+        return restorePlans.Select(plan =>
+        {
+            var result = AnalyzeTarget(plan.Target, plan.NewContent);
+            if (result.State != TargetPatchState.ReadyToInstall)
+            {
+                throw new InvalidDataException("Legacy backup does not contain a supported original target.");
+            }
+
+            return new TargetSnapshot(plan.Target, result, plan.NewContent);
+        }).ToArray();
     }
 
     /// <summary>
@@ -1529,10 +1716,11 @@ public sealed partial class AntiRecallService : IAntiRecallService
 
         var ready = targets.Count(target => target.State == TargetPatchState.ReadyToInstall);
         var installed = targets.Count(target => target.State == TargetPatchState.Installed);
-        var blocked = targets.Count - ready - installed;
+        var legacy = targets.Count(target => target.State == TargetPatchState.LegacyInstalled);
+        var blocked = targets.Count - ready - installed - legacy;
         var processDetail = isRunning ? " QQ 正在运行，写入操作已禁用。" : string.Empty;
         var backupDetail = hasCompatibleBackup ? " 已找到兼容备份。" : string.Empty;
-        return $"目标 {targets.Count} 个：可安装 {ready}，已安装 {installed}，异常 {blocked}。{processDetail}{backupDetail}".Trim();
+        return $"目标 {targets.Count} 个：可安装 {ready}，已安装 {installed}，待升级 {legacy}，异常 {blocked}。{processDetail}{backupDetail}".Trim();
     }
 
     /// <summary>

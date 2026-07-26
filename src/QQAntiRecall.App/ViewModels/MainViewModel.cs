@@ -594,7 +594,9 @@ public partial class MainViewModel : ViewModelBase
         bool canCloseQqInstallAndRestart = result.IsPlatformSupported
             && result.IsQqRunning
             && result.Targets.Count > 0
-            && result.Targets.All(target => target.State == TargetPatchState.ReadyToInstall);
+            && (result.Targets.All(target => target.State == TargetPatchState.ReadyToInstall)
+                || (result.Targets.All(target => target.State == TargetPatchState.LegacyInstalled)
+                    && result.LatestBackupId is not null));
         SetActionAvailability(result.CanInstall, result.CanRestore, canCloseQqInstallAndRestart);
 
         if (!result.IsPlatformSupported)
@@ -639,7 +641,18 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        bool anyInstalled = result.Targets.Any(target => target.State == TargetPatchState.Installed);
+        bool allLegacy = result.Targets.All(target => target.State == TargetPatchState.LegacyInstalled);
+        if (allLegacy)
+        {
+            SetStatus(
+                result.LatestBackupId is null ? "旧版补丁缺少可用备份" : "检测到可升级的旧版补丁",
+                result.Summary,
+                StatusSeverity.Warning);
+            return;
+        }
+
+        bool anyInstalled = result.Targets.Any(target =>
+            target.State is TargetPatchState.Installed or TargetPatchState.LegacyInstalled);
         SetStatus(
             anyInstalled ? "部分 QQ 版本尚未安装" : "已找到可安装版本",
             result.Summary,

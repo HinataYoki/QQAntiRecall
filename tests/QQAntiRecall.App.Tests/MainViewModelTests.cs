@@ -31,6 +31,33 @@ public sealed class MainViewModelTests
     }
 
     /// <summary>
+    /// Verifies a recognized 0.0.1 target is presented as an actionable upgrade instead of an error.
+    /// </summary>
+    [Fact]
+    public async Task Initialization_LegacyPatchIsPresentedAsUpgrade()
+    {
+        FakeAntiRecallService core = new()
+        {
+            DiscoveredPath = @"D:\Tencent\QQNT",
+            ScanResult = CreateScan(
+                canInstall: true,
+                canRestore: true,
+                state: TargetPatchState.LegacyInstalled),
+        };
+        MainViewModel viewModel = new(core, new FakeUserInteractionService());
+
+        await viewModel.Initialization;
+
+        var target = Assert.Single(viewModel.Targets);
+        Assert.Equal("可升级", target.StatusLabel);
+        Assert.True(target.IsReady);
+        Assert.True(viewModel.CanInstall);
+        Assert.True(viewModel.CanRestore);
+        Assert.Equal("检测到可升级的旧版补丁", viewModel.StatusTitle);
+        Assert.True(viewModel.IsStatusWarning);
+    }
+
+    /// <summary>
     /// Verifies that declining installation leaves the core service untouched.
     /// </summary>
     [Fact]
@@ -305,10 +332,15 @@ public sealed class MainViewModelTests
             IsPlatformSupported: true,
             IsQqRunning: isQqRunning,
             [target],
-            state == TargetPatchState.Installed ? "backup-1" : null,
+            state is TargetPatchState.Installed or TargetPatchState.LegacyInstalled ? "backup-1" : null,
             canInstall && !isQqRunning,
             canRestore && !isQqRunning,
-            state == TargetPatchState.Installed ? "所有目标均已安装。" : "目标可以安全安装。");
+            state switch
+            {
+                TargetPatchState.Installed => "所有目标均已安装。",
+                TargetPatchState.LegacyInstalled => "检测到可升级的旧版补丁。",
+                _ => "目标可以安全安装。",
+            });
     }
 
     /// <summary>

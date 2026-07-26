@@ -73,9 +73,9 @@ public sealed class TargetItemViewModel : ViewModelBase
     public string ShortHash => Sha256.Length <= 16 ? Sha256 : $"{Sha256[..16]}...";
 
     /// <summary>
-    /// Gets whether this target contains exactly one match for every original signature.
+    /// Gets whether this target can be installed or safely upgraded from a recognized legacy patch.
     /// </summary>
-    public bool IsReady => State == TargetPatchState.ReadyToInstall;
+    public bool IsReady => State is TargetPatchState.ReadyToInstall or TargetPatchState.LegacyInstalled;
 
     /// <summary>
     /// Gets whether this target contains the complete installed patch set.
@@ -95,7 +95,8 @@ public sealed class TargetItemViewModel : ViewModelBase
     /// <summary>
     /// Gets whether this target is actionable or explicitly unsupported.
     /// </summary>
-    public bool IsStatusWarning => State is TargetPatchState.ReadyToInstall or TargetPatchState.Unsupported;
+    public bool IsStatusWarning => State is
+        TargetPatchState.ReadyToInstall or TargetPatchState.LegacyInstalled or TargetPatchState.Unsupported;
 
     /// <summary>
     /// Gets whether this target cannot be safely modified in its current state.
@@ -111,6 +112,7 @@ public sealed class TargetItemViewModel : ViewModelBase
     {
         TargetPatchState.ReadyToInstall => "可安装",
         TargetPatchState.Installed => "已启用",
+        TargetPatchState.LegacyInstalled => "可升级",
         TargetPatchState.Missing => "文件缺失",
         TargetPatchState.Inconsistent => "状态异常",
         TargetPatchState.Unsupported => "暂不支持",
