@@ -3,7 +3,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>QQAntiRecall</AssemblyName>
-    <Version>0.0.2</Version>
+    <Version>0.0.3</Version>
     <Product>QQAntiRecall</Product>
     <Nullable>enable</Nullable>
     <ApplicationIcon>Assets\avalonia-logo.ico</ApplicationIcon>
