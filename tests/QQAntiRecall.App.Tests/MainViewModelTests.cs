@@ -17,7 +17,7 @@ public sealed class MainViewModelTests
             DiscoveredPath = @"D:\Tencent\QQNT",
             ScanResult = CreateScan(canInstall: true),
         };
-        MainViewModel viewModel = new(core, new FakeUserInteractionService());
+        MainViewModel viewModel = new(core, new FakeQqntIntegrityService(), new FakeUserInteractionService());
 
         await viewModel.Initialization;
 
@@ -44,7 +44,7 @@ public sealed class MainViewModelTests
                 canRestore: true,
                 state: TargetPatchState.LegacyInstalled),
         };
-        MainViewModel viewModel = new(core, new FakeUserInteractionService());
+        MainViewModel viewModel = new(core, new FakeQqntIntegrityService(), new FakeUserInteractionService());
 
         await viewModel.Initialization;
 
@@ -69,7 +69,7 @@ public sealed class MainViewModelTests
             ScanResult = CreateScan(canInstall: true),
         };
         FakeUserInteractionService interaction = new() { ConfirmInstallResult = false };
-        MainViewModel viewModel = new(core, interaction);
+        MainViewModel viewModel = new(core, new FakeQqntIntegrityService(), interaction);
         await viewModel.Initialization;
 
         await viewModel.InstallCommand.ExecuteAsync(null);
@@ -92,7 +92,7 @@ public sealed class MainViewModelTests
             InstallSucceeded = false,
             InstallMessage = "安装已拒绝：预检后目标状态发生变化。",
         };
-        MainViewModel viewModel = new(core, new FakeUserInteractionService());
+        MainViewModel viewModel = new(core, new FakeQqntIntegrityService(), new FakeUserInteractionService());
         await viewModel.Initialization;
 
         await viewModel.InstallCommand.ExecuteAsync(null);
@@ -122,7 +122,7 @@ public sealed class MainViewModelTests
                 Succeeded: true),
         };
         FakeUserInteractionService interaction = new();
-        MainViewModel viewModel = new(core, interaction);
+        MainViewModel viewModel = new(core, new FakeQqntIntegrityService(), interaction);
         await viewModel.Initialization;
 
         Assert.True(viewModel.IsQqRunning);
@@ -152,7 +152,7 @@ public sealed class MainViewModelTests
             ScanResult = CreateScan(canRestore: true, state: TargetPatchState.Installed),
         };
         FakeUserInteractionService interaction = new() { ConfirmRestoreResult = false };
-        MainViewModel viewModel = new(core, interaction);
+        MainViewModel viewModel = new(core, new FakeQqntIntegrityService(), interaction);
         await viewModel.Initialization;
 
         await viewModel.RestoreCommand.ExecuteAsync(null);
@@ -173,7 +173,7 @@ public sealed class MainViewModelTests
             DiscoveredPath = @"D:\Tencent\QQNT",
             ScanException = new UnauthorizedAccessException("denied"),
         };
-        MainViewModel viewModel = new(core, new FakeUserInteractionService());
+        MainViewModel viewModel = new(core, new FakeQqntIntegrityService(), new FakeUserInteractionService());
 
         await viewModel.Initialization;
 
@@ -194,7 +194,7 @@ public sealed class MainViewModelTests
         TaskCompletionSource<AntiRecallScanResult> pendingScan =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         FakeAntiRecallService core = new() { PendingScan = pendingScan.Task };
-        MainViewModel viewModel = new(core, new FakeUserInteractionService())
+        MainViewModel viewModel = new(core, new FakeQqntIntegrityService(), new FakeUserInteractionService())
         {
             InstallPath = @"D:\Tencent\QQNT",
         };
@@ -227,7 +227,7 @@ public sealed class MainViewModelTests
             ScanResult = CreateScan(canInstall: true, installRoot: @"E:\Apps\QQ"),
         };
         FakeUserInteractionService interaction = new() { SelectedPath = @"E:\Apps\QQ" };
-        MainViewModel viewModel = new(core, interaction);
+        MainViewModel viewModel = new(core, new FakeQqntIntegrityService(), interaction);
         await viewModel.Initialization;
 
         await viewModel.BrowseCommand.ExecuteAsync(null);
@@ -245,7 +245,7 @@ public sealed class MainViewModelTests
     {
         FakeAntiRecallService core = new() { BackupDirectoryPath = @"C:\Data\QQAntiRecall\backups" };
         FakeUserInteractionService interaction = new();
-        MainViewModel viewModel = new(core, interaction);
+        MainViewModel viewModel = new(core, new FakeQqntIntegrityService(), interaction);
         await viewModel.Initialization;
 
         await viewModel.OpenBackupDirectoryCommand.ExecuteAsync(null);
@@ -273,7 +273,7 @@ public sealed class MainViewModelTests
                 Succeeded: true),
         };
         FakeUserInteractionService interaction = new();
-        MainViewModel viewModel = new(core, interaction);
+        MainViewModel viewModel = new(core, new FakeQqntIntegrityService(), interaction);
         await viewModel.Initialization;
 
         await viewModel.CleanupBackupsCommand.ExecuteAsync(null);
@@ -300,13 +300,182 @@ public sealed class MainViewModelTests
             CleanupPreview = new BackupCleanupPreview(["old-backup"], 1024, 1, 0),
         };
         FakeUserInteractionService interaction = new() { ConfirmBackupCleanupResult = false };
-        MainViewModel viewModel = new(core, interaction);
+        MainViewModel viewModel = new(core, new FakeQqntIntegrityService(), interaction);
         await viewModel.Initialization;
 
         await viewModel.CleanupBackupsCommand.ExecuteAsync(null);
 
         Assert.Equal(0, core.CleanupCallCount);
         Assert.False(viewModel.IsBusy);
+    }
+
+    /// <summary>
+    /// Verifies startup maps the QQNT.dll integrity state into its own section without touching patch state.
+    /// </summary>
+    [Fact]
+    public async Task Initialization_MapsIntegrityStateIntoSeparateSection()
+    {
+        FakeAntiRecallService core = new()
+        {
+            DiscoveredPath = @"D:\Tencent\QQNT",
+            ScanResult = CreateScan(canInstall: true),
+        };
+        FakeQqntIntegrityService integrity = new();
+        MainViewModel viewModel = new(core, integrity, new FakeUserInteractionService());
+
+        await viewModel.Initialization;
+
+        var target = Assert.Single(viewModel.IntegrityTargets);
+        Assert.Equal("检测有效", target.StatusLabel);
+        Assert.Equal("检测有效", target.StateLabel);
+        Assert.True(target.IsReady);
+        Assert.False(target.IsPatched);
+        Assert.False(target.HasBackup);
+        Assert.Equal("无备份", target.BackupLabel);
+        Assert.True(viewModel.HasIntegrityTargets);
+        Assert.False(viewModel.HasNoIntegrityTargets);
+        Assert.Equal("完整性自检会退出 QQ", viewModel.IntegrityStatus);
+        Assert.True(viewModel.IsIntegrityWarning);
+        Assert.False(viewModel.IsIntegritySuccess);
+        Assert.True(viewModel.CanApplyIntegrity);
+        Assert.False(viewModel.CanRestoreIntegrity);
+        Assert.Equal("已找到可安装版本", viewModel.StatusTitle);
+        Assert.Equal(1, integrity.ScanCallCount);
+    }
+
+    /// <summary>
+    /// Verifies a confirmed integrity apply reaches the core service and reports success.
+    /// </summary>
+    [Fact]
+    public async Task ApplyIntegrityCommand_WhenConfirmed_DisablesSelfCheck()
+    {
+        FakeAntiRecallService core = new()
+        {
+            DiscoveredPath = @"D:\Tencent\QQNT",
+            ScanResult = CreateScan(canInstall: true),
+        };
+        QqntIntegrityScanResult patchedScan = FakeQqntIntegrityService.CreateIntegrityScan(
+            QqntIntegrityState.Patched,
+            canApply: false,
+            canRestore: true);
+        FakeQqntIntegrityService integrity = new()
+        {
+            ApplyResult = new QqntIntegrityOperationResult(
+                patchedScan,
+                "已关闭 1 个 QQNT.dll 的完整性自检，QQ 不会再因补丁而自动退出。",
+                Succeeded: true),
+        };
+        FakeUserInteractionService interaction = new();
+        MainViewModel viewModel = new(core, integrity, interaction);
+        await viewModel.Initialization;
+
+        await viewModel.ApplyIntegrityCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, interaction.IntegrityApplyConfirmationCount);
+        Assert.Equal(1, integrity.ApplyCallCount);
+        var target = Assert.Single(viewModel.IntegrityTargets);
+        Assert.Equal("已关闭", target.StatusLabel);
+        Assert.True(target.IsPatched);
+        Assert.True(target.HasBackup);
+        Assert.True(viewModel.IsIntegritySuccess);
+        Assert.Equal("完整性自检已关闭", viewModel.IntegrityStatus);
+        Assert.Contains("完整性自检", viewModel.IntegrityDetail);
+        Assert.False(viewModel.CanApplyIntegrity);
+        Assert.True(viewModel.CanRestoreIntegrity);
+        Assert.False(viewModel.IsBusy);
+        Assert.Equal("已找到可安装版本", viewModel.StatusTitle);
+    }
+
+    /// <summary>
+    /// Verifies declining the integrity confirmation never invokes the core operation.
+    /// </summary>
+    [Fact]
+    public async Task ApplyIntegrityCommand_WhenConfirmationDeclined_DoesNotModify()
+    {
+        FakeAntiRecallService core = new()
+        {
+            DiscoveredPath = @"D:\Tencent\QQNT",
+            ScanResult = CreateScan(canInstall: true),
+        };
+        FakeQqntIntegrityService integrity = new();
+        FakeUserInteractionService interaction = new() { ConfirmIntegrityApplyResult = false };
+        MainViewModel viewModel = new(core, integrity, interaction);
+        await viewModel.Initialization;
+
+        await viewModel.ApplyIntegrityCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, interaction.IntegrityApplyConfirmationCount);
+        Assert.Equal(0, integrity.ApplyCallCount);
+        Assert.True(viewModel.CanApplyIntegrity);
+    }
+
+    /// <summary>
+    /// Verifies the integrity restore path reaches the core service and reports its refreshed state.
+    /// </summary>
+    [Fact]
+    public async Task RestoreIntegrityCommand_WhenConfirmed_RestoresOriginalBytes()
+    {
+        FakeAntiRecallService core = new()
+        {
+            DiscoveredPath = @"D:\Tencent\QQNT",
+            ScanResult = CreateScan(canRestore: true, state: TargetPatchState.Installed),
+        };
+        FakeQqntIntegrityService integrity = new()
+        {
+            ScanResult = FakeQqntIntegrityService.CreateIntegrityScan(
+                QqntIntegrityState.Patched,
+                canApply: false,
+                canRestore: true),
+            RestoreResult = new QqntIntegrityOperationResult(
+                FakeQqntIntegrityService.CreateIntegrityScan(),
+                "已从备份还原 1 个 QQNT.dll。",
+                Succeeded: true),
+        };
+        FakeUserInteractionService interaction = new();
+        MainViewModel viewModel = new(core, integrity, interaction);
+        await viewModel.Initialization;
+
+        Assert.True(viewModel.CanRestoreIntegrity);
+
+        await viewModel.RestoreIntegrityCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, interaction.IntegrityRestoreConfirmationCount);
+        Assert.Equal(1, integrity.RestoreCallCount);
+        var target = Assert.Single(viewModel.IntegrityTargets);
+        Assert.Equal("检测有效", target.StatusLabel);
+        Assert.True(viewModel.IsIntegrityWarning);
+        Assert.Equal("已从备份还原 1 个 QQNT.dll。", viewModel.IntegrityDetail);
+    }
+
+    /// <summary>
+    /// Verifies an integrity scan failure is contained in its own section and never blocks the patch workflow.
+    /// </summary>
+    [Fact]
+    public async Task Initialization_WhenIntegrityScanFails_KeepsPatchWorkflowUsable()
+    {
+        FakeAntiRecallService core = new()
+        {
+            DiscoveredPath = @"D:\Tencent\QQNT",
+            ScanResult = CreateScan(canInstall: true),
+        };
+        FakeQqntIntegrityService integrity = new()
+        {
+            ScanException = new UnauthorizedAccessException("denied"),
+        };
+        MainViewModel viewModel = new(core, integrity, new FakeUserInteractionService());
+
+        await viewModel.Initialization;
+
+        Assert.Empty(viewModel.IntegrityTargets);
+        Assert.True(viewModel.HasNoIntegrityTargets);
+        Assert.Equal("扫描失败", viewModel.IntegrityStatus);
+        Assert.Contains("denied", viewModel.IntegrityDetail);
+        Assert.True(viewModel.IsIntegrityError);
+        Assert.False(viewModel.CanApplyIntegrity);
+        Assert.False(viewModel.CanRestoreIntegrity);
+        Assert.True(viewModel.CanInstall);
+        Assert.Equal("已找到可安装版本", viewModel.StatusTitle);
+        Assert.False(viewModel.IsStatusError);
     }
 
     /// <summary>
@@ -503,6 +672,14 @@ public sealed class MainViewModelTests
 
         public int BackupCleanupConfirmationCount { get; private set; }
 
+        public int IntegrityApplyConfirmationCount { get; private set; }
+
+        public int IntegrityRestoreConfirmationCount { get; private set; }
+
+        public bool ConfirmIntegrityApplyResult { get; init; } = true;
+
+        public bool ConfirmIntegrityRestoreResult { get; init; } = true;
+
         public string? OpenedDirectoryPath { get; private set; }
 
         public int LastBackupCleanupCount { get; private set; }
@@ -564,6 +741,29 @@ public sealed class MainViewModelTests
         }
 
         /// <summary>
+        /// Returns the configured integrity apply confirmation and records the prompt.
+        /// </summary>
+        public Task<bool> ConfirmIntegrityApplyAsync(
+            string installPath,
+            int targetCount,
+            CancellationToken cancellationToken = default)
+        {
+            IntegrityApplyConfirmationCount++;
+            return Task.FromResult(ConfirmIntegrityApplyResult);
+        }
+
+        /// <summary>
+        /// Returns the configured integrity restore confirmation and records the prompt.
+        /// </summary>
+        public Task<bool> ConfirmIntegrityRestoreAsync(
+            string installPath,
+            CancellationToken cancellationToken = default)
+        {
+            IntegrityRestoreConfirmationCount++;
+            return Task.FromResult(ConfirmIntegrityRestoreResult);
+        }
+
+        /// <summary>
         /// Captures cleanup preview details and returns the configured confirmation result.
         /// </summary>
         public Task<bool> ConfirmBackupCleanupAsync(
@@ -575,6 +775,96 @@ public sealed class MainViewModelTests
             LastBackupCleanupCount = backupCount;
             LastBackupCleanupBytes = reclaimableBytes;
             return Task.FromResult(ConfirmBackupCleanupResult);
+        }
+    }
+
+    /// <summary>
+    /// In-memory QQNT.dll integrity fake used to isolate ViewModel behavior from real files.
+    /// </summary>
+    private sealed class FakeQqntIntegrityService : IQqntIntegrityService
+    {
+        public QqntIntegrityScanResult ScanResult { get; init; } = CreateIntegrityScan();
+
+        public Exception? ScanException { get; init; }
+
+        public QqntIntegrityOperationResult? ApplyResult { get; init; }
+
+        public QqntIntegrityOperationResult? RestoreResult { get; init; }
+
+        public int ScanCallCount { get; private set; }
+
+        public int ApplyCallCount { get; private set; }
+
+        public int RestoreCallCount { get; private set; }
+
+        /// <summary>
+        /// Returns, or throws, the configured integrity scan behavior.
+        /// </summary>
+        public Task<QqntIntegrityScanResult> ScanAsync(
+            string installRoot,
+            CancellationToken cancellationToken = default)
+        {
+            ScanCallCount++;
+            if (ScanException is not null)
+            {
+                throw ScanException;
+            }
+
+            return Task.FromResult(ScanResult);
+        }
+
+        /// <summary>
+        /// Records the apply request and returns its configured refreshed scan.
+        /// </summary>
+        public Task<QqntIntegrityOperationResult> ApplyAsync(
+            string installRoot,
+            CancellationToken cancellationToken = default)
+        {
+            ApplyCallCount++;
+            return Task.FromResult(ApplyResult
+                ?? new QqntIntegrityOperationResult(ScanResult, "已关闭完整性自检。", Succeeded: true));
+        }
+
+        /// <summary>
+        /// Records the restore request and returns its configured refreshed scan.
+        /// </summary>
+        public Task<QqntIntegrityOperationResult> RestoreAsync(
+            string installRoot,
+            CancellationToken cancellationToken = default)
+        {
+            RestoreCallCount++;
+            return Task.FromResult(RestoreResult
+                ?? new QqntIntegrityOperationResult(ScanResult, "已还原原始文件。", Succeeded: true));
+        }
+
+        /// <summary>
+        /// Creates a deterministic integrity snapshot that never touches real QQ files.
+        /// </summary>
+        public static QqntIntegrityScanResult CreateIntegrityScan(
+            QqntIntegrityState state = QqntIntegrityState.ReadyToPatch,
+            bool canApply = true,
+            bool canRestore = false,
+            bool isQqRunning = false,
+            string installRoot = @"D:\Tencent\QQNT")
+        {
+            QqntIntegrityTargetResult target = new(
+                "9.9.37-54276",
+                Path.Combine(installRoot, "versions", "9.9.37-54276", "QQNT.dll"),
+                state,
+                214607912,
+                "ABCDEF0123456789",
+                Path.Combine(installRoot, "versions", "9.9.37-54276", "QQNT.dll.qqantirecall-orig.bak"),
+                state is QqntIntegrityState.Patched or QqntIntegrityState.SkipPatched,
+                "校验点 0x517643。");
+
+            return new QqntIntegrityScanResult(
+                installRoot,
+                IsPlatformSupported: true,
+                isQqRunning,
+                [target],
+                canApply,
+                canRestore,
+                "发现未处理的完整性自检。");
         }
     }
 }

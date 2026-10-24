@@ -142,6 +142,26 @@
                                 <TextBlock Classes="rail-value" Text="{Binding BackupStatus}" />
                             </StackPanel>
                         </Grid>
+
+                        <Grid ColumnDefinitions="32,*" ColumnSpacing="{StaticResource Space3}">
+                            <Border Classes="rail-icon"
+                                    Classes.success="{Binding IsIntegritySuccess}"
+                                    Classes.warning="{Binding IsIntegrityWarning}"
+                                    Classes.error="{Binding IsIntegrityError}">
+                                <LucideIcon Kind="FileCheck"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            AutomationProperties.AccessibilityView="Raw" />
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="{StaticResource Space1}">
+                                <TextBlock Classes="muted" Text="自检状态" />
+                                <TextBlock Classes="rail-value"
+                                           Classes.success="{Binding IsIntegritySuccess}"
+                                           Classes.warning="{Binding IsIntegrityWarning}"
+                                           Classes.error="{Binding IsIntegrityError}"
+                                           Text="{Binding IntegrityStatus}" />
+                            </StackPanel>
+                        </Grid>
                     </StackPanel>
 
                     <StackPanel Grid.Row="2"
@@ -394,6 +414,182 @@
                                                 AutomationProperties.AccessibilityView="Raw" />
                                     <TextBlock Classes="h2"
                                                Text="未发现 QQ 版本"
+                                               HorizontalAlignment="Center" />
+                                    <TextBlock Classes="muted"
+                                               Text="选择有效的 QQ 安装目录后重新扫描"
+                                               TextAlignment="Center"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <Border Classes="divider" Margin="{StaticResource SectionDividerMargin}" />
+
+                        <StackPanel Spacing="{StaticResource Space4}">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <StackPanel Orientation="Horizontal"
+                                            Spacing="{StaticResource Space2}"
+                                            VerticalAlignment="Center">
+                                    <TextBlock Classes="muted mono" Text="03" />
+                                    <TextBlock Classes="h2" Text="完整性自检" />
+                                </StackPanel>
+                                <Border Grid.Column="1"
+                                        Classes="status-pill"
+                                        Classes.warning="{Binding IsIntegrityWarning}">
+                                    <StackPanel Orientation="Horizontal" Spacing="{StaticResource Space1}">
+                                        <LucideIcon Kind="FileCheck"
+                                                    Size="{StaticResource IconSizeSm}"
+                                                    Foreground="{DynamicResource AccentBrush}"
+                                                    AutomationProperties.AccessibilityView="Raw" />
+                                        <TextBlock Text="{Binding IntegrityTargetStatus}"
+                                                   FontSize="{StaticResource FontSizeXs}"
+                                                   FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <Border x:Name="IntegrityStatusBand"
+                                    Classes="status-band"
+                                    Classes.success="{Binding IsIntegritySuccess}"
+                                    Classes.warning="{Binding IsIntegrityWarning}"
+                                    Classes.error="{Binding IsIntegrityError}">
+                                <Grid ColumnDefinitions="Auto,*"
+                                      RowDefinitions="Auto,Auto"
+                                      ColumnSpacing="{StaticResource Space3}"
+                                      RowSpacing="{StaticResource Space3}">
+                                    <LucideIcon Kind="ShieldAlert"
+                                                Size="{StaticResource IconSizeLg}"
+                                                VerticalAlignment="Top"
+                                                AutomationProperties.AccessibilityView="Raw" />
+                                    <StackPanel Grid.Column="1" Spacing="{StaticResource Space1}">
+                                        <TextBlock x:Name="IntegrityStatusText"
+                                                   Classes="h2"
+                                                   Text="{Binding IntegrityStatus}"
+                                                   TextWrapping="Wrap"
+                                                   AutomationProperties.LiveSetting="Polite" />
+                                        <TextBlock Classes="secondary"
+                                                   Text="{Binding IntegrityDetail}"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="1"
+                                                Grid.Column="1"
+                                                Orientation="Horizontal"
+                                                Spacing="{StaticResource Space2}">
+                                        <Button x:Name="RestoreIntegrityButton"
+                                                Classes="secondary action"
+                                                Command="{Binding RestoreIntegrityCommand}"
+                                                IsEnabled="{Binding CanRestoreIntegrity}"
+                                                AutomationProperties.Name="还原 QQNT.dll 原始文件"
+                                                AutomationProperties.AutomationId="integrity.restore">
+                                            <StackPanel Orientation="Horizontal"
+                                                        Spacing="{StaticResource Space2}"
+                                                        VerticalAlignment="Center">
+                                                <LucideIcon Kind="RotateCcw"
+                                                            VerticalAlignment="Center"
+                                                            AutomationProperties.AccessibilityView="Raw" />
+                                                <TextBlock Text="还原文件" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Button>
+
+                                        <Button x:Name="ApplyIntegrityButton"
+                                                Classes="primary"
+                                                Command="{Binding ApplyIntegrityCommand}"
+                                                IsEnabled="{Binding CanApplyIntegrity}"
+                                                AutomationProperties.Name="关闭 QQNT.dll 完整性自检"
+                                                AutomationProperties.AutomationId="integrity.apply">
+                                            <StackPanel Orientation="Horizontal" Spacing="{StaticResource Space2}">
+                                                <LucideIcon Kind="ShieldOff"
+                                                            AutomationProperties.AccessibilityView="Raw" />
+                                                <TextBlock Text="关闭自检" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <ItemsControl x:Name="IntegrityTargetList"
+                                          ItemsSource="{Binding IntegrityTargets}"
+                                          IsVisible="{Binding HasIntegrityTargets}"
+                                          AutomationProperties.Name="QQNT.dll 完整性自检状态"
+                                          AutomationProperties.AutomationId="integrity.list">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:QqntIntegrityTargetItemViewModel">
+                                        <Border Classes="target-row">
+                                            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                                                  ColumnDefinitions="Auto,*,Auto"
+                                                  RowSpacing="{StaticResource Space2}"
+                                                  ColumnSpacing="{StaticResource Space3}">
+                                                <TextBlock Classes="target-version"
+                                                           Text="{Binding Version}"
+                                                           VerticalAlignment="Center" />
+
+                                                <Border Grid.Column="2"
+                                                        Classes="state-badge"
+                                                        Classes.ready="{Binding IsReady}"
+                                                        Classes.installed="{Binding IsPatched}"
+                                                        Classes.problem="{Binding IsProblem}"
+                                                        AutomationProperties.Name="自检状态">
+                                                    <TextBlock Text="{Binding StateLabel}" />
+                                                </Border>
+
+                                                <TextBlock Grid.Row="1"
+                                                           Grid.ColumnSpan="3"
+                                                           Classes="secondary"
+                                                           Text="{Binding Detail}"
+                                                           TextWrapping="Wrap" />
+
+                                                <TextBlock Grid.Row="2"
+                                                           Grid.Column="0"
+                                                           Classes="metadata-label"
+                                                           Text="SHA-256" />
+                                                <TextBlock Grid.Row="2"
+                                                           Grid.Column="1"
+                                                           Grid.ColumnSpan="2"
+                                                           Classes="metadata-value mono"
+                                                           Text="{Binding ShortHash}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip.Tip="{Binding Sha256}" />
+
+                                                <TextBlock Grid.Row="3"
+                                                           Grid.Column="0"
+                                                           Classes="metadata-label"
+                                                           Text="原始备份" />
+                                                <TextBlock Grid.Row="3"
+                                                           Grid.Column="1"
+                                                           Grid.ColumnSpan="2"
+                                                           Classes="metadata-value"
+                                                           Text="{Binding BackupLabel}" />
+
+                                                <TextBlock Grid.Row="4"
+                                                           Grid.Column="0"
+                                                           Classes="metadata-label"
+                                                           Text="文件" />
+                                                <TextBlock Grid.Row="4"
+                                                           Grid.Column="1"
+                                                           Grid.ColumnSpan="2"
+                                                           Classes="metadata-value"
+                                                           Text="{Binding FilePath}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip.Tip="{Binding FilePath}" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <Border x:Name="IntegrityEmptyState"
+                                    Classes="empty-state"
+                                    IsVisible="{Binding HasNoIntegrityTargets}">
+                                <StackPanel Spacing="{StaticResource Space3}"
+                                            HorizontalAlignment="Center">
+                                    <LucideIcon Kind="FileCheck"
+                                                Size="{StaticResource IconSizeXl}"
+                                                Foreground="{DynamicResource TextMutedBrush}"
+                                                HorizontalAlignment="Center"
+                                                AutomationProperties.AccessibilityView="Raw" />
+                                    <TextBlock Classes="h2"
+                                               Text="未发现 QQNT.dll"
                                                HorizontalAlignment="Center" />
                                     <TextBlock Classes="muted"
                                                Text="选择有效的 QQ 安装目录后重新扫描"

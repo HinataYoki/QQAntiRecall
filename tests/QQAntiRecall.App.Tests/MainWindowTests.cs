@@ -6,6 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Media.Imaging;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using QQAntiRecall.App.ViewModels;
 using QQAntiRecall.App.Views;
 using QQAntiRecall.Core;
@@ -36,6 +37,11 @@ public sealed class MainWindowTests
             Assert.NotNull(window.FindControl<Button>("CloseQqInstallAndRestartButton"));
             Assert.NotNull(window.FindControl<Button>("OpenBackupDirectoryButton"));
             Assert.NotNull(window.FindControl<Button>("CleanupBackupsButton"));
+            Assert.NotNull(window.FindControl<Border>("IntegrityStatusBand"));
+            Assert.NotNull(window.FindControl<ItemsControl>("IntegrityTargetList"));
+            Assert.NotNull(window.FindControl<TextBlock>("IntegrityStatusText"));
+            Assert.NotNull(window.FindControl<Button>("ApplyIntegrityButton"));
+            Assert.NotNull(window.FindControl<Button>("RestoreIntegrityButton"));
             Button restoreButton = window.FindControl<Button>("RestoreButton")!;
             Assert.Equal(HorizontalAlignment.Center, restoreButton.HorizontalContentAlignment);
             Assert.Equal(VerticalAlignment.Center, restoreButton.VerticalContentAlignment);
@@ -82,6 +88,8 @@ public sealed class MainWindowTests
             Assert.True(window.FindControl<Button>("RestoreButton")!.IsVisible);
             Assert.True(window.FindControl<Button>("OpenBackupDirectoryButton")!.IsVisible);
             Assert.True(window.FindControl<Button>("CleanupBackupsButton")!.IsVisible);
+            Assert.NotNull(window.FindControl<Button>("ApplyIntegrityButton"));
+            Assert.NotNull(window.FindControl<Button>("RestoreIntegrityButton"));
             Assert.True(window.FindControl<TextBox>("InstallPathBox")!.Bounds.Width > 0);
             Assert.True(window.FindControl<Border>("StatusRail")!.Bounds.Width > 0);
 
@@ -150,6 +158,53 @@ public sealed class MainWindowTests
     }
 
     /// <summary>
+    /// Verifies the integrity section renders its rows and actions when scrolled into view.
+    /// </summary>
+    [AvaloniaFact]
+    public void MainWindow_IntegritySection_ShowsPatchActions()
+    {
+        var window = CreateWindow(960, 720, CreatePopulatedViewModel());
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            ScrollViewer scrollViewer = window.GetVisualDescendants().OfType<ScrollViewer>().First();
+            scrollViewer.Offset = new Vector(0, scrollViewer.Extent.Height);
+            Dispatcher.UIThread.RunJobs();
+
+            Button applyButton = window.FindControl<Button>("ApplyIntegrityButton")!;
+            Button restoreIntegrityButton = window.FindControl<Button>("RestoreIntegrityButton")!;
+            Assert.True(applyButton.IsVisible);
+            Assert.False(applyButton.IsEnabled);
+            Assert.True(restoreIntegrityButton.IsVisible);
+            Assert.False(restoreIntegrityButton.IsEnabled);
+            Assert.True(window.FindControl<Border>("IntegrityStatusBand")!.IsVisible);
+            Assert.Contains(
+                window.FindControl<ItemsControl>("IntegrityTargetList")!.GetVisualDescendants().OfType<TextBlock>(),
+                text => text.Text == "检测有效");
+
+            using var frame = window.CaptureRenderedFrame();
+            Assert.NotNull(frame);
+            var screenshotPath = Environment.GetEnvironmentVariable("QQAR_INTEGRITY_SCREENSHOT_PATH");
+            if (!string.IsNullOrWhiteSpace(screenshotPath))
+            {
+                var directory = Path.GetDirectoryName(screenshotPath);
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                frame.Save(screenshotPath, PngBitmapEncoderOptions.Default);
+            }
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    /// <summary>
     /// Creates an installed design snapshot used to verify version-row density and metadata rendering.
     /// </summary>
     /// <returns>A populated ViewModel that performs no filesystem or process access.</returns>
@@ -165,7 +220,24 @@ public sealed class MainWindowTests
             QqProcessStatus = "未运行",
             VersionStatus = "已发现 1 个版本",
             BackupStatus = "备份可用",
+            IntegrityStatus = "完整性自检会退出 QQ",
+            IntegrityDetail = "校验点 0x517643，启动约 15 分钟后会因检测到补丁而退出 QQ。",
+            IntegrityTargetStatus = "1 个文件",
+            IsIntegrityWarning = true,
         };
+        viewModel.IntegrityTargets.Add(new QqntIntegrityTargetItemViewModel(new QqntIntegrityTargetResult(
+            "9.9.37-54276",
+            Path.Combine(installRoot, "versions", "9.9.37-54276", "QQNT.dll"),
+            QqntIntegrityState.ReadyToPatch,
+            214607912,
+            "DBF4D6A03AA9FEF43B2C5B7CF0FBBBBF00F22E8F020ED5E40C073B9FC66CE21C",
+            Path.Combine(
+                installRoot,
+                "versions",
+                "9.9.37-54276",
+                "QQNT.dll.qqantirecall-orig.bak"),
+            HasBackup: false,
+            "校验点 0x517643，启动约 15 分钟后会因检测到补丁而退出 QQ。")));
         viewModel.Targets.Add(new TargetItemViewModel(new TargetScanResult(
             "9.9.33-51728",
             Path.Combine(installRoot, "versions", "9.9.33-51728", "resources", "app", "wrapper.node"),

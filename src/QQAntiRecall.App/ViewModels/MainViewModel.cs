@@ -17,10 +17,13 @@ namespace QQAntiRecall.App.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     private readonly IAntiRecallService? _antiRecallService;
+    private readonly IQqntIntegrityService? _qqntIntegrityService;
     private readonly IUserInteractionService? _userInteractionService;
     private bool _scanAllowsInstall;
     private bool _scanAllowsRestore;
     private bool _scanAllowsCloseQqInstallAndRestart;
+    private bool _scanAllowsIntegrityApply;
+    private bool _scanAllowsIntegrityRestore;
     private string? _lastScannedPath;
 
     [ObservableProperty]
@@ -47,11 +50,15 @@ public partial class MainViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(CanInstall))]
     [NotifyPropertyChangedFor(nameof(CanRestore))]
     [NotifyPropertyChangedFor(nameof(CanCloseQqInstallAndRestart))]
+    [NotifyPropertyChangedFor(nameof(CanApplyIntegrity))]
+    [NotifyPropertyChangedFor(nameof(CanRestoreIntegrity))]
     [NotifyCanExecuteChangedFor(nameof(BrowseCommand))]
     [NotifyCanExecuteChangedFor(nameof(ScanCommand))]
     [NotifyCanExecuteChangedFor(nameof(InstallCommand))]
     [NotifyCanExecuteChangedFor(nameof(RestoreCommand))]
     [NotifyCanExecuteChangedFor(nameof(CloseQqInstallAndRestartCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ApplyIntegrityCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RestoreIntegrityCommand))]
     [NotifyCanExecuteChangedFor(nameof(OpenBackupDirectoryCommand))]
     [NotifyCanExecuteChangedFor(nameof(CleanupBackupsCommand))]
     private bool _isBusy;
@@ -84,6 +91,24 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private string _backupStatus = "尚未检查";
 
+    [ObservableProperty]
+    private string _integrityStatus = "尚未检查";
+
+    [ObservableProperty]
+    private string _integrityDetail = "扫描后显示 QQNT.dll 完整性自检状态。";
+
+    [ObservableProperty]
+    private string _integrityTargetStatus = "尚未扫描";
+
+    [ObservableProperty]
+    private bool _isIntegritySuccess;
+
+    [ObservableProperty]
+    private bool _isIntegrityWarning;
+
+    [ObservableProperty]
+    private bool _isIntegrityError;
+
     /// <summary>
     /// Creates design-time state without discovering or reading a QQ installation.
     /// </summary>
@@ -101,12 +126,15 @@ public partial class MainViewModel : ViewModelBase
     /// Creates the production workflow and immediately starts safe discovery and scanning.
     /// </summary>
     /// <param name="antiRecallService">Core service that owns all QQ file operations.</param>
+    /// <param name="qqntIntegrityService">Core service that owns QQNT.dll integrity self-check operations.</param>
     /// <param name="userInteractionService">UI service for directory picking and confirmations.</param>
     public MainViewModel(
         IAntiRecallService antiRecallService,
+        IQqntIntegrityService qqntIntegrityService,
         IUserInteractionService userInteractionService)
     {
         _antiRecallService = antiRecallService ?? throw new ArgumentNullException(nameof(antiRecallService));
+        _qqntIntegrityService = qqntIntegrityService ?? throw new ArgumentNullException(nameof(qqntIntegrityService));
         _userInteractionService = userInteractionService ?? throw new ArgumentNullException(nameof(userInteractionService));
         Initialization = InitializeAsync();
     }
@@ -120,6 +148,21 @@ public partial class MainViewModel : ViewModelBase
     /// Gets the version targets from the most recent successful scan.
     /// </summary>
     public ObservableCollection<TargetItemViewModel> Targets { get; } = [];
+
+    /// <summary>
+    /// Gets the QQNT.dll integrity self-check targets from the most recent scan.
+    /// </summary>
+    public ObservableCollection<QqntIntegrityTargetItemViewModel> IntegrityTargets { get; } = [];
+
+    /// <summary>
+    /// Gets whether at least one integrity target is available for display.
+    /// </summary>
+    public bool HasIntegrityTargets => IntegrityTargets.Count > 0;
+
+    /// <summary>
+    /// Gets whether the current scan has no integrity targets.
+    /// </summary>
+    public bool HasNoIntegrityTargets => !HasIntegrityTargets;
 
     /// <summary>
     /// Gets whether at least one version target is available for display.
@@ -157,6 +200,16 @@ public partial class MainViewModel : ViewModelBase
     public bool CanCloseQqInstallAndRestart => _scanAllowsCloseQqInstallAndRestart && !IsBusy;
 
     /// <summary>
+    /// Gets whether the QQNT.dll integrity self-check can be disabled now.
+    /// </summary>
+    public bool CanApplyIntegrity => _scanAllowsIntegrityApply && !IsBusy;
+
+    /// <summary>
+    /// Gets whether the QQNT.dll integrity self-check can be restored from its original backup now.
+    /// </summary>
+    public bool CanRestoreIntegrity => _scanAllowsIntegrityRestore && !IsBusy;
+
+    /// <summary>
     /// Clears stale scan results when the user changes the installation path.
     /// </summary>
     /// <param name="value">New path entered or selected by the user.</param>
@@ -169,14 +222,23 @@ public partial class MainViewModel : ViewModelBase
 
         _lastScannedPath = null;
         ReplaceTargets([]);
+        ReplaceIntegrityTargets([]);
         IsQqRunning = false;
         QqProcessStatus = "等待检测";
         VersionStatus = "尚未扫描";
         BackupStatus = "尚未检查";
+        IntegrityStatus = "尚未检查";
+        IntegrityDetail = "扫描后显示 QQNT.dll 完整性自检状态。";
+        IntegrityTargetStatus = "尚未扫描";
+        IsIntegritySuccess = false;
+        IsIntegrityWarning = false;
+        IsIntegrityError = false;
         SetActionAvailability(
             canInstall: false,
             canRestore: false,
-            canCloseQqInstallAndRestart: false);
+            canCloseQqInstallAndRestart: false,
+            canApplyIntegrity: false,
+            canRestoreIntegrity: false);
         SetStatus(
             "目录已更改",
             "请重新扫描所选 QQ 安装目录。",
@@ -486,6 +548,92 @@ public partial class MainViewModel : ViewModelBase
     private bool CanRestoreCommand() => CanRestore;
 
     /// <summary>
+    /// Confirms and disables the QQNT.dll integrity self-check that terminates patched QQ clients.
+    /// </summary>
+    /// <returns>A task that completes after confirmation and the optional apply operation.</returns>
+    [RelayCommand(CanExecute = nameof(CanApplyIntegrityCommand))]
+    private async Task ApplyIntegrityAsync()
+    {
+        try
+        {
+            if (_qqntIntegrityService is null || _userInteractionService is null)
+            {
+                SetMissingRuntimeServicesStatus();
+                return;
+            }
+
+            bool confirmed = await _userInteractionService.ConfirmIntegrityApplyAsync(
+                InstallPath,
+                IntegrityTargets.Count(t => t.IsReady));
+            if (!confirmed)
+            {
+                return;
+            }
+
+            SetBusy(true, "正在关闭 QQNT.dll 完整性自检...");
+            QqntIntegrityOperationResult result = await _qqntIntegrityService.ApplyAsync(InstallPath);
+            ApplyIntegrityScanResult(result.Scan);
+            IntegrityDetail = result.Message;
+        }
+        catch (Exception exception)
+        {
+            HandleIntegrityException("关闭完整性自检失败", exception);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    /// <summary>
+    /// Determines whether the integrity self-check can be disabled by the latest scan and activity state.
+    /// </summary>
+    /// <returns>The current bindable integrity apply availability.</returns>
+    private bool CanApplyIntegrityCommand() => CanApplyIntegrity;
+
+    /// <summary>
+    /// Confirms and restores every patched QQNT.dll from its original-byte backup.
+    /// </summary>
+    /// <returns>A task that completes after confirmation and the optional restore operation.</returns>
+    [RelayCommand(CanExecute = nameof(CanRestoreIntegrityCommand))]
+    private async Task RestoreIntegrityAsync()
+    {
+        try
+        {
+            if (_qqntIntegrityService is null || _userInteractionService is null)
+            {
+                SetMissingRuntimeServicesStatus();
+                return;
+            }
+
+            bool confirmed = await _userInteractionService.ConfirmIntegrityRestoreAsync(InstallPath);
+            if (!confirmed)
+            {
+                return;
+            }
+
+            SetBusy(true, "正在还原 QQNT.dll 原始文件...");
+            QqntIntegrityOperationResult result = await _qqntIntegrityService.RestoreAsync(InstallPath);
+            ApplyIntegrityScanResult(result.Scan);
+            IntegrityDetail = result.Message;
+        }
+        catch (Exception exception)
+        {
+            HandleIntegrityException("还原 QQNT.dll 失败", exception);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    /// <summary>
+    /// Determines whether the integrity restore is allowed by the latest scan and activity state.
+    /// </summary>
+    /// <returns>The current bindable integrity restore availability.</returns>
+    private bool CanRestoreIntegrityCommand() => CanRestoreIntegrity;
+
+    /// <summary>
     /// Discovers the QQ root and performs the first scan without allowing exceptions to escape startup.
     /// </summary>
     /// <returns>A task exposed through <see cref="Initialization"/> for deterministic host and test startup.</returns>
@@ -555,6 +703,7 @@ public partial class MainViewModel : ViewModelBase
         {
             AntiRecallScanResult result = await _antiRecallService.ScanAsync(InstallPath);
             ApplyScanResult(result);
+            await ScanIntegrityAsync(InstallPath);
         }
         finally
         {
@@ -597,7 +746,12 @@ public partial class MainViewModel : ViewModelBase
             && (result.Targets.All(target => target.State == TargetPatchState.ReadyToInstall)
                 || (result.Targets.All(target => target.State == TargetPatchState.LegacyInstalled)
                     && result.LatestBackupId is not null));
-        SetActionAvailability(result.CanInstall, result.CanRestore, canCloseQqInstallAndRestart);
+        SetActionAvailability(
+            result.CanInstall,
+            result.CanRestore,
+            canCloseQqInstallAndRestart,
+            _scanAllowsIntegrityApply,
+            _scanAllowsIntegrityRestore);
 
         if (!result.IsPlatformSupported)
         {
@@ -660,6 +814,171 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Scans QQNT.dll integrity state without letting a failure break the anti-recall workflow.
+    /// </summary>
+    /// <param name="installRoot">QQ installation root that contains QQ.exe and versions.</param>
+    /// <returns>A task that completes after the integrity state is mapped to bindable state.</returns>
+    private async Task ScanIntegrityAsync(string installRoot)
+    {
+        if (_qqntIntegrityService is null)
+        {
+            ReplaceIntegrityTargets([]);
+            IntegrityStatus = "不可用";
+            IntegrityDetail = "缺少完整性自检服务，请重新启动应用。";
+            IntegrityTargetStatus = "不可用";
+            SetIntegritySeverity(IntegrityStatusKind.Error);
+            SetActionAvailability(
+                _scanAllowsInstall,
+                _scanAllowsRestore,
+                _scanAllowsCloseQqInstallAndRestart,
+                canApplyIntegrity: false,
+                canRestoreIntegrity: false);
+            return;
+        }
+
+        try
+        {
+            QqntIntegrityScanResult result = await _qqntIntegrityService.ScanAsync(installRoot);
+            ApplyIntegrityScanResult(result);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            ReplaceIntegrityTargets([]);
+            IntegrityStatus = "扫描失败";
+            IntegrityDetail = exception.Message;
+            IntegrityTargetStatus = "扫描失败";
+            SetIntegritySeverity(IntegrityStatusKind.Error);
+            SetActionAvailability(
+                _scanAllowsInstall,
+                _scanAllowsRestore,
+                _scanAllowsCloseQqInstallAndRestart,
+                canApplyIntegrity: false,
+                canRestoreIntegrity: false);
+        }
+    }
+
+    /// <summary>
+    /// Maps a QQNT.dll integrity scan into bindable rows and independent status state.
+    /// </summary>
+    /// <param name="result">Verified integrity snapshot returned by the core service.</param>
+    private void ApplyIntegrityScanResult(QqntIntegrityScanResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        ReplaceIntegrityTargets(result.Targets.Select(target => new QqntIntegrityTargetItemViewModel(target)));
+        IntegrityTargetStatus = result.Targets.Count switch
+        {
+            0 => "未发现文件",
+            1 => "1 个文件",
+            _ => $"{result.Targets.Count} 个文件",
+        };
+        IntegrityStatus = DetermineIntegrityStatus(result);
+        IntegrityDetail = result.Summary;
+        SetIntegritySeverity(
+            !result.IsPlatformSupported || result.IsQqRunning
+                ? IntegrityStatusKind.Warning
+                : DetermineIntegritySeverity(result));
+        SetActionAvailability(
+            _scanAllowsInstall,
+            _scanAllowsRestore,
+            _scanAllowsCloseQqInstallAndRestart,
+            result.CanApply,
+            result.CanRestore);
+    }
+
+    /// <summary>
+    /// Derives the concise integrity heading from the verified snapshot.
+    /// </summary>
+    /// <param name="result">Verified integrity snapshot returned by the core service.</param>
+    /// <returns>A short Chinese heading for the integrity section.</returns>
+    private static string DetermineIntegrityStatus(QqntIntegrityScanResult result)
+    {
+        if (!result.IsPlatformSupported)
+        {
+            return "当前平台暂不支持";
+        }
+
+        if (result.Targets.Count == 0)
+        {
+            return "未发现 QQNT.dll";
+        }
+
+        if (result.Targets.Any(target => target.State is QqntIntegrityState.Unreadable))
+        {
+            return "文件读取失败";
+        }
+
+        if (result.Targets.Any(target => target.State == QqntIntegrityState.Unsupported))
+        {
+            return "存在未识别的文件";
+        }
+
+        if (result.Targets.All(target =>
+                target.State is QqntIntegrityState.Patched or QqntIntegrityState.SkipPatched))
+        {
+            return "完整性自检已关闭";
+        }
+
+        if (result.Targets.Any(target => target.State is QqntIntegrityState.Patched or QqntIntegrityState.SkipPatched))
+        {
+            return "部分版本尚未处理";
+        }
+
+        return result.IsQqRunning ? "待关闭（QQ 正在运行）" : "完整性自检会退出 QQ";
+    }
+
+    /// <summary>
+    /// Derives the integrity section severity from the verified snapshot.
+    /// </summary>
+    /// <param name="result">Verified integrity snapshot returned by the core service.</param>
+    /// <returns>The matching severity for the integrity section.</returns>
+    private static IntegrityStatusKind DetermineIntegritySeverity(QqntIntegrityScanResult result)
+    {
+        if (result.Targets.Count == 0)
+        {
+            return IntegrityStatusKind.Warning;
+        }
+
+        if (result.Targets.Any(target =>
+                target.State is QqntIntegrityState.Unreadable or QqntIntegrityState.Unsupported))
+        {
+            return IntegrityStatusKind.Error;
+        }
+
+        return result.Targets.All(target =>
+            target.State is QqntIntegrityState.Patched or QqntIntegrityState.SkipPatched)
+            ? IntegrityStatusKind.Success
+            : IntegrityStatusKind.Warning;
+    }
+
+    /// <summary>
+    /// Replaces integrity rows and raises the two complementary collection-state properties once.
+    /// </summary>
+    /// <param name="targets">New integrity rows in display order.</param>
+    private void ReplaceIntegrityTargets(IEnumerable<QqntIntegrityTargetItemViewModel> targets)
+    {
+        IntegrityTargets.Clear();
+        foreach (QqntIntegrityTargetItemViewModel target in targets)
+        {
+            IntegrityTargets.Add(target);
+        }
+
+        OnPropertyChanged(nameof(HasIntegrityTargets));
+        OnPropertyChanged(nameof(HasNoIntegrityTargets));
+    }
+
+    /// <summary>
+    /// Applies mutually exclusive integrity section visual flags.
+    /// </summary>
+    /// <param name="kind">Severity used to select exactly one integrity class.</param>
+    private void SetIntegritySeverity(IntegrityStatusKind kind)
+    {
+        IsIntegritySuccess = kind == IntegrityStatusKind.Success;
+        IsIntegrityWarning = kind == IntegrityStatusKind.Warning;
+        IsIntegrityError = kind == IntegrityStatusKind.Error;
+    }
+
+    /// <summary>
     /// Replaces target rows and raises the two complementary collection-state properties once.
     /// </summary>
     /// <param name="targets">New target rows in display order.</param>
@@ -680,20 +999,31 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     /// <param name="canInstall">Whether the latest scan permits a complete installation.</param>
     /// <param name="canRestore">Whether the latest scan found a compatible backup to restore.</param>
+    /// <param name="canCloseQqInstallAndRestart">Whether the running-QQ workflow is allowed.</param>
+    /// <param name="canApplyIntegrity">Whether the QQNT.dll integrity self-check can be disabled.</param>
+    /// <param name="canRestoreIntegrity">Whether patched QQNT.dll files can be restored.</param>
     private void SetActionAvailability(
         bool canInstall,
         bool canRestore,
-        bool canCloseQqInstallAndRestart)
+        bool canCloseQqInstallAndRestart,
+        bool canApplyIntegrity,
+        bool canRestoreIntegrity)
     {
         _scanAllowsInstall = canInstall;
         _scanAllowsRestore = canRestore;
         _scanAllowsCloseQqInstallAndRestart = canCloseQqInstallAndRestart;
+        _scanAllowsIntegrityApply = canApplyIntegrity;
+        _scanAllowsIntegrityRestore = canRestoreIntegrity;
         OnPropertyChanged(nameof(CanInstall));
         OnPropertyChanged(nameof(CanRestore));
         OnPropertyChanged(nameof(CanCloseQqInstallAndRestart));
+        OnPropertyChanged(nameof(CanApplyIntegrity));
+        OnPropertyChanged(nameof(CanRestoreIntegrity));
         InstallCommand.NotifyCanExecuteChanged();
         RestoreCommand.NotifyCanExecuteChanged();
         CloseQqInstallAndRestartCommand.NotifyCanExecuteChanged();
+        ApplyIntegrityCommand.NotifyCanExecuteChanged();
+        RestoreIntegrityCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>
@@ -732,7 +1062,9 @@ public partial class MainViewModel : ViewModelBase
         SetActionAvailability(
             canInstall: false,
             canRestore: false,
-            canCloseQqInstallAndRestart: false);
+            canCloseQqInstallAndRestart: false,
+            canApplyIntegrity: _scanAllowsIntegrityApply,
+            canRestoreIntegrity: _scanAllowsIntegrityRestore);
 
         string detail = exception switch
         {
@@ -744,6 +1076,33 @@ public partial class MainViewModel : ViewModelBase
         };
 
         SetStatus(operationTitle, detail, StatusSeverity.Error);
+        SetBusy(false);
+    }
+
+    /// <summary>
+    /// Converts an integrity command exception into its own section status without touching the patch status.
+    /// </summary>
+    /// <param name="operationTitle">Integrity-specific failure heading.</param>
+    /// <param name="exception">Failure mapped to a safe user-facing recovery message.</param>
+    private void HandleIntegrityException(string operationTitle, Exception exception)
+    {
+        SetActionAvailability(
+            _scanAllowsInstall,
+            _scanAllowsRestore,
+            _scanAllowsCloseQqInstallAndRestart,
+            canApplyIntegrity: false,
+            canRestoreIntegrity: false);
+
+        IntegrityStatus = operationTitle;
+        IntegrityDetail = exception switch
+        {
+            UnauthorizedAccessException => "没有权限修改 QQ 文件。请以管理员身份运行后重试。",
+            DirectoryNotFoundException => "QQ 安装目录不存在或已被移动，请重新选择目录。",
+            FileNotFoundException => "未找到 QQNT.dll，可能刚完成更新。请重新扫描。",
+            OperationCanceledException => "操作已取消，未修改 QQ 文件。",
+            _ => $"{exception.Message}\n请确认 QQ 已完全退出、目录正确，然后重试。",
+        };
+        SetIntegritySeverity(IntegrityStatusKind.Error);
         SetBusy(false);
     }
 
@@ -803,6 +1162,13 @@ public partial class MainViewModel : ViewModelBase
         : "界面可在当前平台运行，但 QQ 文件修改功能暂未开放。";
 
     private enum StatusSeverity
+    {
+        Success,
+        Warning,
+        Error,
+    }
+
+    private enum IntegrityStatusKind
     {
         Success,
         Warning,

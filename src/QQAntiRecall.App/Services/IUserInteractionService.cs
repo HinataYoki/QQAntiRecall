@@ -62,6 +62,28 @@ public interface IUserInteractionService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Confirms disabling the QQNT.dll integrity self-check that terminates patched QQ clients.
+    /// </summary>
+    /// <param name="installPath">QQ installation root shown to the user.</param>
+    /// <param name="targetCount">Number of QQNT.dll files that may be modified.</param>
+    /// <param name="cancellationToken">Cancellation requested by the application lifetime.</param>
+    /// <returns><see langword="true"/> only when the user explicitly approves the change.</returns>
+    Task<bool> ConfirmIntegrityApplyAsync(
+        string installPath,
+        int targetCount,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Confirms restoring every QQNT.dll from the original bytes saved next to it.
+    /// </summary>
+    /// <param name="installPath">QQ installation root whose files will be restored.</param>
+    /// <param name="cancellationToken">Cancellation requested by the application lifetime.</param>
+    /// <returns><see langword="true"/> only when the user explicitly approves restoration.</returns>
+    Task<bool> ConfirmIntegrityRestoreAsync(
+        string installPath,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Confirms permanent deletion of the exact obsolete backup set shown in a cleanup preview.
     /// </summary>
     /// <param name="backupCount">Number of backup directories approved for deletion.</param>

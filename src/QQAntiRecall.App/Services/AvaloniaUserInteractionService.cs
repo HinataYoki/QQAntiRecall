@@ -128,6 +128,48 @@ public sealed class AvaloniaUserInteractionService : IUserInteractionService
     }
 
     /// <summary>
+    /// Shows the confirmation for disabling the QQNT.dll integrity self-check.
+    /// </summary>
+    /// <param name="installPath">QQ installation root displayed in the confirmation.</param>
+    /// <param name="targetCount">Number of QQNT.dll files included in the operation.</param>
+    /// <param name="cancellationToken">Cancellation checked around modal interaction.</param>
+    /// <returns><see langword="true"/> only when the change is explicitly approved.</returns>
+    public Task<bool> ConfirmIntegrityApplyAsync(
+        string installPath,
+        int targetCount,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        string targetText = targetCount == 1 ? "1 个 QQNT.dll" : $"{targetCount} 个 QQNT.dll";
+        return ShowConfirmationAsync(
+            "关闭完整性自检",
+            $"将先保存原始字节备份，再修改 {targetText} 的完整性自检失败分支。" +
+            "修改后即使检测到防撤回补丁，QQ 也不会再提示文件损坏并自动退出。请确认 QQ 已完全退出。\n\n" +
+            $"目录：{installPath}",
+            "关闭自检",
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Shows the confirmation for restoring QQNT.dll original bytes.
+    /// </summary>
+    /// <param name="installPath">QQ installation root displayed in the confirmation.</param>
+    /// <param name="cancellationToken">Cancellation checked around modal interaction.</param>
+    /// <returns><see langword="true"/> only when restoration is explicitly approved.</returns>
+    public Task<bool> ConfirmIntegrityRestoreAsync(
+        string installPath,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ShowConfirmationAsync(
+            "还原 QQNT.dll",
+            $"将从同目录备份还原原始字节。还原后完整性自检恢复，打补丁的版本会在启动约 15 分钟后退出 QQ。" +
+            $"请确认 QQ 已完全退出。\n\n目录：{installPath}",
+            "还原",
+            cancellationToken);
+    }
+
+    /// <summary>
     /// Shows the permanent cleanup confirmation with the exact directory count and verified byte size.
     /// </summary>
     /// <param name="backupCount">Number of backup directories in the approved preview.</param>
